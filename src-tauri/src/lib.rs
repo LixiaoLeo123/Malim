@@ -1,0 +1,310 @@
+use futures::stream::{self, StreamExt};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager, State};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WordBlock {
+    text: String,
+    pos: String,
+    definition: String,
+    chinese_root: Option<String>,
+    grammar_note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Sentence {
+    id: String,
+    original: String,
+    blocks: Vec<WordBlock>,
+}
+
+#[derive(Clone, Serialize)]
+struct ProgressPayload {
+    id: String,
+    current: usize,
+    total: usize,
+    percent: u32,
+}
+
+struct AppState {
+    // sentence_cache: Mutex<HashMap<String, Vec<WordBlock>>>,
+}
+
+fn build_prompt(lang: &str, sentence: &str) -> String {
+    let lang_target = if lang == "KR" { "Korean" } else { "Russian" };
+
+    let pos_rules = if lang == "KR" {
+        r#"
+POS Tagging (Strictly use these tags only):
+- noun: Common nouns, proper nouns.
+- pronoun: I, you, he, this, that.
+- verb: Action verbs.
+- adjective: Descriptive verbs.
+- adverb: Modifying verbs/adjectives.
+- particle: Case markers, topic markers.
+- ending: Verb endings, connectives.
+- punctuation: Periods (.), commas (,), question marks (?), exclamation marks (!).
+- unknown: If unable to determine.
+"#
+    } else {
+        "Standard Russian POS tagging (noun, verb, adj, adv, prep, conj, punctuation, etc.)."
+    };
+
+    let specific_rule = if lang == "KR" {
+        "For Sino-Korean words, providing 'chinese_root' is MANDATORY."
+    } else {
+        "For 'chinese_root', always return null."
+    };
+
+    format!(
+        r#"
+You are a precise JSON generator.
+STRICT RULES:
+1. Output MUST be a valid JSON array.
+2. Do NOT use Markdown code blocks.
+3. Use ONLY standard ASCII punctuation.
+4. Do NOT include any text outside the JSON array.
+
+Task: Analyze the {lang_target} sentence below.
+1. TOKENIZATION: Split into morphemes.
+   - CRITICAL: Do NOT decompose Hangul characters (Jamo).
+   - CRITICAL: Do NOT discard punctuation. Output punctuation as separate blocks with pos 'punctuation'.
+2. {pos_rules}
+3. Provide concise English definition.
+4. {specific_rule}
+
+Example Output:
+[
+    {{ "text": "학교", "pos": "noun", "definition": "school", "chinese_root": "学校", "grammar_note": null }},
+    {{ "text": ".", "pos": "punctuation", "definition": ".", "chinese_root": null, "grammar_note": null }}
+]
+
+Sentence: "{sentence}"
+Output:
+"#
+    )
+}
+
+
+
+async fn call_ai_api(
+    api_key: &str,
+    api_url: &str,
+    model_name: &str,
+    prompt: String,
+) -> Result<Vec<WordBlock>, String> {
+    let client = reqwest::Client::new();
+
+    let request_body = serde_json::json!({
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant that outputs only JSON."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1,
+        "stream": false,
+        "max_tokens": 8196,
+        "enable_thinking": false
+    });
+
+    let res = client
+        .post(api_url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("Network Error: {}", e))?;
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let text = res
+            .text()
+            .await
+            .unwrap_or_else(|_| "Cannot read response body".to_string());
+        return Err(format!("API Error Code: {}, Body: {}", status, text));
+    }
+
+    let response_text = res
+        .text()
+        .await
+        .map_err(|e| format!("Read Body Error: {}", e))?;
+
+    println!("----- API Raw Response -----");
+    println!("{}", response_text);
+    println!("---------------------------");
+
+    let json_res: serde_json::Value = serde_json::from_str(&response_text)
+        .map_err(|e| format!("JSON Parse Error: {}. Raw text: {}", e, response_text))?;
+
+    let content = json_res["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or("API returned an empty or invalid content field.")?;
+    let clean_content = content
+        .trim()
+        .trim_start_matches("```json")
+        .trim_end_matches("```")
+        .trim();
+
+    let blocks: Vec<WordBlock> = serde_json::from_str(clean_content)
+        .map_err(|e| format!("Invalid JSON Structure: {}", e))?;
+    Ok(blocks)
+}
+
+//major func
+#[tauri::command]
+async fn parse_text(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    text: String,
+    language: String,
+    api_key: String,
+    api_url: String,
+    model_name: String,
+    concurrency: usize,
+    old_sentences: Option<Vec<Sentence>>, //as cache in edit mode
+) -> Result<Vec<Sentence>, String> {
+    if api_key.is_empty() {
+        return Err("API Key is missing".to_string());
+    }
+
+    let mut old_map: HashMap<String, Sentence> = HashMap::new();
+    if let Some(old) = old_sentences {
+        for sent in old {
+            old_map.insert(sent.original.clone(), sent);
+        }
+    }
+    let old_map = Arc::new(old_map);
+
+    let raw_sentences: Vec<String> = text
+        .split_inclusive(|c| matches!(c, '.' | '。' | '!' | '?' | '\n'))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    
+    println!("{:?}", raw_sentences);
+
+    let total = raw_sentences.len();
+
+    let api_key = Arc::new(api_key);
+    let api_url = Arc::new(api_url);
+    let model_name = Arc::new(model_name);
+    let language = Arc::new(language);
+    let id = Arc::new(id);
+    let completed = Arc::new(AtomicUsize::new(0));
+
+    let tasks = raw_sentences.into_iter().enumerate().map(|(i, raw)| {
+        let api_key = Arc::clone(&api_key);
+        let api_url = Arc::clone(&api_url);
+        let model_name = Arc::clone(&model_name);
+        let language = Arc::clone(&language);
+        let id = Arc::clone(&id);
+        let old_map = Arc::clone(&old_map);
+        let completed = Arc::clone(&completed);
+        let app = app.clone();
+
+        async move {
+            let cached = old_map.get(&raw).cloned();
+            let blocks = if let Some(b) = cached {
+                b.blocks
+            } else {
+                let prompt = build_prompt(&language, &raw);
+                match call_ai_api(&api_key, &api_url, &model_name, prompt).await {
+                    Ok(blocks) => blocks,
+                    Err(err) => vec![WordBlock {
+                        text: raw.clone(),
+                        pos: "error".to_string(),
+                        definition: format!("Error: {}", err),
+                        chinese_root: None,
+                        grammar_note: None,
+                    }],
+                }
+            };
+
+            let sentence = Sentence {
+                id: format!("{}_{}", id, i),
+                original: raw,
+                blocks,
+            };
+
+            let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+            let _ = app.emit(
+                "parsing-progress",
+                ProgressPayload {
+                    id: id.to_string(),
+                    current,
+                    total,
+                    percent: ((current as f32 / total as f32) * 100.0) as u32,
+                },
+            );
+
+            (i, sentence)
+        }
+    });
+
+    let mut unordered_results: Vec<(usize, Sentence)> = stream::iter(tasks)
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+
+    unordered_results.sort_by_key(|(i, _)| *i);
+    let results: Vec<Sentence> = unordered_results.into_iter().map(|(_, s)| s).collect();
+
+    Ok(results)
+}
+
+#[derive(Serialize, Deserialize)]
+struct AppData {
+    articles: serde_json::Value,
+    draft: serde_json::Value,
+    api_key: String,
+}
+
+#[tauri::command]
+fn save_data(app: AppHandle, data: String) {
+    let app_data_dir: PathBuf = app
+        .path()
+        .app_data_dir()
+        .expect("failed to get app_data_dir");
+
+    let path = app_data_dir.join("data.json");
+
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    fs::write(&path, data).expect("failed to write data.json");
+}
+
+#[tauri::command]
+fn load_data(app: AppHandle) -> String {
+    let app_data_dir: PathBuf = app
+        .path()
+        .app_data_dir()
+        .expect("failed to get app_data_dir");
+
+    let path = app_data_dir.join("data.json");
+
+    if path.exists() {
+        fs::read_to_string(&path).expect("failed to read data.json")
+    } else {
+        "{}".to_string()
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .manage(AppState {
+            // sentence_cache: Mutex::new(HashMap::new()),
+        })
+        .invoke_handler(tauri::generate_handler![parse_text, save_data, load_data])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

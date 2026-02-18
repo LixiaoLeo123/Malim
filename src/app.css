@@ -1,0 +1,16 @@
+@import "tailwindcss";
+@theme {
+  --color-word-noun: #3b82f6;
+  --color-word-verb: #ef4444;
+  --color-word-adj: #10b981;
+  --color-word-particle: #9ca3af;
+}
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
