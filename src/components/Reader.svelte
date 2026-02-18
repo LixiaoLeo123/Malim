@@ -31,19 +31,28 @@
     let isGrammarExpanded = false;
 
     const colorMap: Record<string, string> = {
-        noun: "bg-blue-50 text-blue-700 active:bg-blue-100",
-        pronoun: "bg-indigo-50 text-indigo-700 active:bg-indigo-100",
-        verb: "bg-red-50 text-red-700 active:bg-red-100",
-        adjective: "bg-rose-50 text-rose-700 active:bg-rose-100",
-        adverb: "bg-emerald-50 text-emerald-700 active:bg-emerald-100",
-        determiner: "bg-sky-50 text-sky-700 active:bg-sky-100",
-        number: "bg-violet-50 text-violet-700 active:bg-violet-100",
-        particle: "bg-zinc-100 text-zinc-600 active:bg-zinc-200",
-        ending: "bg-gray-100 text-gray-600 active:bg-gray-200",
-        suffix: "bg-slate-100 text-slate-600 active:bg-slate-200",
-        interjection: "bg-amber-50 text-amber-700 active:bg-amber-100",
-        punctuation: "bg-transparent text-zinc-400 cursor-default",
-        unknown: "bg-slate-50 text-slate-500 active:bg-slate-100",
+        noun: "bg-blue-50 text-blue-700 active:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:active:bg-blue-900/55",
+        pronoun:
+            "bg-indigo-50 text-indigo-700 active:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-200 dark:active:bg-indigo-900/55",
+        verb: "bg-red-50 text-red-700 active:bg-red-100 dark:bg-red-950/40 dark:text-red-200 dark:active:bg-red-900/55",
+        adjective:
+            "bg-rose-50 text-rose-700 active:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:active:bg-rose-900/55",
+        adverb: "bg-emerald-50 text-emerald-700 active:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:active:bg-emerald-900/55",
+        determiner:
+            "bg-sky-50 text-sky-700 active:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-200 dark:active:bg-sky-900/55",
+        number: "bg-violet-50 text-violet-700 active:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200 dark:active:bg-violet-900/55",
+
+        particle:
+            "bg-zinc-100 text-zinc-600 active:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-200 dark:active:bg-zinc-700/70",
+        ending: "bg-gray-100 text-gray-600 active:bg-gray-200 dark:bg-gray-800/60 dark:text-gray-200 dark:active:bg-gray-700/70",
+        suffix: "bg-slate-100 text-slate-600 active:bg-slate-200 dark:bg-slate-800/60 dark:text-slate-200 dark:active:bg-slate-700/70",
+
+        interjection:
+            "bg-amber-50 text-amber-700 active:bg-amber-100 dark:bg-amber-950/35 dark:text-amber-200 dark:active:bg-amber-900/55",
+        punctuation:
+            "bg-transparent text-zinc-400 cursor-default dark:text-zinc-500",
+        unknown:
+            "bg-slate-50 text-slate-500 active:bg-slate-100 dark:bg-slate-800/50 dark:text-slate-200 dark:active:bg-slate-700/65",
     };
 
     function handleBlockClick(event: MouseEvent, block: Block) {
@@ -78,7 +87,7 @@
         }
 
         const blockCenter = rect.left + rect.width / 2;
-        let arrowLeft = blockCenter - popoverLeft - arrowSize; 
+        let arrowLeft = blockCenter - popoverLeft - arrowSize;
 
         arrowLeft = Math.max(8, Math.min(popoverWidth - 24, arrowLeft));
 
@@ -134,10 +143,11 @@
                 <div class="mb-4 flex flex-wrap gap-y-2 items-end">
                     {#each sentence.blocks as block}
                         <button
-                            class="interactive-block px-1 py-0 mx-[2px] rounded 
+                            class="interactive-block px-1 py-0 mx-[2px] rounded
                             transition-transform duration-75 ease-out
-                            active:scale-95 
-                            {colorMap[block.pos] || 'bg-gray-50 active:bg-gray-100'}"
+                            active:scale-95
+                            {colorMap[block.pos] ||
+                                colorMap['unknown']}"
                             on:click={(e) => handleBlockClick(e, block)}
                         >
                             {block.text}
@@ -155,7 +165,10 @@
     {#if activeBlock}
         <div
             class="reader-popover fixed z-50 w-[300px] bg-zinc-900/95 backdrop-blur text-white rounded-xl shadow-2xl p-4"
-            style="left: {popoverPosition.left}px; top: {popoverPosition.top}px; transform: translateY({popoverPosition.align === 'top' ? '-100%' : '0'});"
+            style="left: {popoverPosition.left}px; top: {popoverPosition.top}px; transform: translateY({popoverPosition.align ===
+            'top'
+                ? '-100%'
+                : '0'});"
             transition:fade={{ duration: 150 }}
             on:click|stopPropagation
         >

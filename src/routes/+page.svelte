@@ -7,9 +7,11 @@
     import { cubicOut } from "svelte/easing";
 </script>
 
-<main class="flex h-screen w-screen overflow-hidden bg-white text-zinc-900">
+<main
+    class="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100"
+>
     <div
-        class="hidden md:block h-full w-80 shrink-0 z-20 border-r border-zinc-200"
+        class="hidden md:block h-full w-80 shrink-0 z-20 border-r border-zinc-200 dark:border-zinc-800"
     >
         <Sidebar />
     </div>
@@ -18,7 +20,7 @@
         <div
             role="button"
             tabindex="0"
-            class="absolute inset-0 z-40 bg-black/50 md:hidden outline-none"
+            class="absolute inset-0 z-40 bg-black/50 outline-none md:hidden"
             on:click={() => isSidebarOpen.set(false)}
             on:keydown={(e) => {
                 if (e.key === "Escape" || e.key === "Enter")
@@ -28,7 +30,7 @@
         ></div>
 
         <div
-            class="absolute inset-y-0 left-0 z-50 w-3/4 md:hidden shadow-2xl bg-white"
+            class="absolute inset-y-0 left-0 z-50 w-3/4 md:hidden shadow-2xl bg-white dark:bg-zinc-950"
             transition:fly={{
                 x: -300,
                 duration: 300,
@@ -40,13 +42,13 @@
         </div>
     {/if}
 
-    <div class="flex-1 h-full relative z-0 bg-white">
+    <div class="flex-1 h-full relative z-0 bg-white dark:bg-zinc-950">
         {#if $currentView === "home"}
             <div
                 class="absolute top-0 left-0 w-full h-14 px-4 flex items-center z-10 md:hidden"
             >
                 <button
-                    class="p-2 -ml-2 rounded-full hover:bg-zinc-100 text-zinc-600 transition-colors"
+                    class="p-2 -ml-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors"
                     on:click={() => isSidebarOpen.set(true)}
                     aria-label="Open sidebar"
                 >
@@ -68,7 +70,7 @@
                 </button>
             </div>
             <div
-                class="flex flex-col items-center justify-center h-full text-zinc-300 select-none pt-14"
+                class="flex flex-col items-center justify-center h-full text-zinc-300 dark:text-zinc-600 select-none pt-14"
             >
                 <p class="md:hidden text-sm">Tap menu to start</p>
                 <p class="hidden md:block">Select a text to read</p>
