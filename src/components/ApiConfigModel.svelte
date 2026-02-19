@@ -8,12 +8,14 @@
     let tempUrl = "";
     let tempModel = "";
     let tempConcurrency = 1;
+    let tempAutoSpeak = true;
 
     $: if (open) {
         tempKey = $settings.apiKey;
         tempUrl = $settings.apiUrl;
         tempModel = $settings.modelName;
         tempConcurrency = $settings.concurrency;
+        tempAutoSpeak = $settings.autoSpeak;
     }
 
     function handleSave() {
@@ -21,7 +23,8 @@
             apiKey: tempKey.trim(),
             apiUrl: tempUrl.trim(),
             modelName: tempModel.trim(),
-            concurrency: tempConcurrency
+            concurrency: tempConcurrency,
+            autoSpeak: tempAutoSpeak,
         });
         open = false;
     }
@@ -49,7 +52,9 @@
 
             <div class="space-y-3">
                 <label class="block">
-                    <span class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400">
+                    <span
+                        class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                    >
                         API Key
                     </span>
                     <input
@@ -61,7 +66,9 @@
                 </label>
 
                 <label class="block">
-                    <span class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400">
+                    <span
+                        class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                    >
                         Base URL
                     </span>
                     <input
@@ -73,7 +80,9 @@
                 </label>
 
                 <label class="block">
-                    <span class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400">
+                    <span
+                        class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                    >
                         Model Name
                     </span>
                     <input
@@ -85,7 +94,9 @@
                 </label>
 
                 <label class="block">
-                    <span class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400">
+                    <span
+                        class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                    >
                         Concurrency
                     </span>
                     <input
@@ -95,11 +106,44 @@
                         max={10}
                         step={1}
                         class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
+                        style="appearance: textfield; -moz-appearance: textfield;"
                     />
                     <span class="block text-xs text-zinc-400 mt-1">
                         Recommended 3-5. Higher rates may trigger API limits.
                     </span>
+                    <style>
+                        input[type="number"]::-webkit-inner-spin-button,
+                        input[type="number"]::-webkit-outer-spin-button {
+                            -webkit-appearance: none;
+                            margin: 0;
+                        }
+                        input[type="number"]::-moz-inner-spin-button,
+                        input[type="number"]::-moz-outer-spin-button {
+                            -moz-appearance: none;
+                            margin: 0;
+                        }
+                    </style>
                 </label>
+            </div>
+            <div class="flex items-center justify-between mt-3">
+                <span class="text-sm text-zinc-600 dark:text-zinc-300"
+                    >Auto Speak</span
+                >
+                <button
+                    type="button"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempAutoSpeak
+                        ? 'bg-zinc-900 dark:bg-zinc-100'
+                        : 'bg-zinc-300 dark:bg-zinc-700'}"
+                    aria-label="Auto Speak"
+                    aria-pressed={tempAutoSpeak}
+                    on:click={() => (tempAutoSpeak = !tempAutoSpeak)}
+                >
+                    <span
+                        class="inline-block h-5 w-5 transform rounded-full bg-white dark:bg-zinc-900 transition-transform {tempAutoSpeak
+                            ? 'translate-x-5'
+                            : 'translate-x-1'}"
+                    ></span>
+                </button>
             </div>
 
             <div class="flex justify-end pt-2 gap-2">

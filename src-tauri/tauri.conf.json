@@ -18,7 +18,15 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/**",
+          "$APPDATA/com.tauri-app.malim/**",
+          "$APPDATA/com.tauri-app.malim/audio/**"
+        ]
+      }
     }
   },
   "bundle": {

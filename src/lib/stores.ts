@@ -32,8 +32,12 @@ export const settings = writable<Settings>({
     apiKey: '',
     apiUrl: '',
     modelName: '',
-    concurrency: 1
+    concurrency: 1,
+    autoSpeak: false
 })
+
+export const parsingQueue = writable<string[]>([]); // article id
+export const isProcessingQueue = writable(false);
 
 async function load() {
     const raw = await invoke<string>('load_data');
@@ -63,8 +67,9 @@ async function save() {
     }, 500);
 }
 
-await load();
-
-articles.subscribe(save);
-editorDraft.subscribe(save);
-settings.subscribe(save);
+(async () => {
+    await load();
+    articles.subscribe(save);
+    editorDraft.subscribe(save);
+    settings.subscribe(save);
+})();

@@ -5,6 +5,8 @@
         articles,
         activeArticleId,
         settings,
+        parsingQueue,
+        isProcessingQueue,
     } from "../lib/stores";
     import { ArrowLeft, Check, ChevronDown } from "lucide-svelte";
     import { slide } from "svelte/transition";
@@ -28,25 +30,93 @@
     onDestroy(() => {
         // if (unlisten) unlisten();
     });
+    async function processQueue() {
+        if ($isProcessingQueue || $parsingQueue.length === 0) return;
+        isProcessingQueue.set(true);
+        const currentId = $parsingQueue[0];
+        const currentArticle = $articles.find((a) => a.id === currentId);
+        if (!currentArticle) {
+            parsingQueue.update((q) => q.slice(1));
+            isProcessingQueue.set(false);
+            processQueue();
+            return;
+        }
+        const unlisten = await listen<any>("parsing-progress", (event) => {
+            const payload = event.payload;
+            if (payload.id === currentId) {
+                articles.update((items) =>
+                    items.map((i) => {
+                        if (i.id === currentId) {
+                            return {
+                                ...i,
+                                parsingProgress: payload.percent,
+                            };
+                        }
+                        return i;
+                    }),
+                );
+            }
+        });
+
+        try {
+            const result: any = await invoke("parse_text", {
+                id: currentId,
+                text: currentArticle.draftContent,
+                language: currentArticle.language,
+                apiKey: $settings.apiKey,
+                apiUrl: $settings.apiUrl,
+                modelName: $settings.modelName,
+                concurrency: $settings.concurrency,
+                oldSentences: currentArticle.sentences || null,
+            });
+
+            articles.update((items) =>
+                items.map((i) => {
+                    if (i.id === currentId) {
+                        return {
+                            ...i,
+                            status: "done",
+                            sentences: result,
+                            parsingProgress: 100,
+                        };
+                    }
+                    return i;
+                }),
+            );
+        } catch (e) {
+            console.error("Analysis Failed:", e);
+            articles.update((items) =>
+                items.map((i) =>
+                    i.id === currentId
+                        ? { ...i, status: "error", parsingProgress: 0 }
+                        : i,
+                ),
+            );
+            alert("AI Analysis Error: " + e);
+        } finally {
+            unlisten();
+            parsingQueue.update((q) => q.slice(1));
+            isProcessingQueue.set(false);
+            processQueue();
+        }
+    }
 
     async function handleConfirm() {
-        //get snapshot
         const contentSnapshot = $editorDraft.content;
         const languageSnapshot = $editorDraft.language;
 
         if (!contentSnapshot.trim()) return;
 
         if (!$settings.apiKey) {
-            alert("Please go to Settings and enter your API Key first.");
+            alert("Please configure your API first.");
             return;
         }
 
         const isEditMode = !!$activeArticleId;
         const id = isEditMode && $activeArticleId ? $activeArticleId : uuidv4();
 
-        const oldArticle = isEditMode
-            ? $articles.find((a) => a.id === id)
-            : null;
+        const existingArticle = isEditMode ? $articles.find(a => a.id === id) : null;
+
         const firstSentenceEnd = contentSnapshot.search(/[.。!?]\n?/);
         const newArticle: Article = {
             id: id,
@@ -64,7 +134,7 @@
                     : contentSnapshot.slice(0, 50),
             status: "parsing",
             parsingProgress: 0,
-            sentences: [],
+            sentences: existingArticle?.sentences || [],
             draftContent: contentSnapshot,
             language: languageSnapshot,
         };
@@ -79,70 +149,15 @@
 
         editorDraft.set({ title: "", content: "", language: "KR" });
         currentView.set("home");
-
-        if (unlisten) unlisten();
-
-        unlisten = await listen<any>("parsing-progress", (event) => {
-            const payload = event.payload;
-            if (payload.id === id) {
-                articles.update((items) =>
-                    items.map((i) => {
-                        if (i.id === id) {
-                            return { ...i, parsingProgress: payload.percent };
-                        }
-                        return i;
-                    }),
-                );
-            }
-        });
-
-        try {
-            const result: any = await invoke("parse_text", {
-                id: id,
-                text: contentSnapshot,
-                language: languageSnapshot,
-                apiKey: $settings.apiKey,
-                apiUrl: $settings.apiUrl,
-                modelName: $settings.modelName,
-                concurrency: $settings.concurrency,
-                oldSentences:
-                    isEditMode && oldArticle ? oldArticle.sentences : null,
-            });
-
-            articles.update((items) =>
-                items.map((i) => {
-                    if (i.id === id) {
-                        return {
-                            ...i,
-                            status: "done",
-                            sentences: result,
-                            parsingProgress: 100,
-                        };
-                    }
-                    return i;
-                }),
-            );
-        } catch (e) {
-            console.error("Analysis Failed:", e);
-            articles.update((items) =>
-                items.map((i) =>
-                    i.id === id
-                        ? { ...i, status: "error", parsingProgress: 0 }
-                        : i,
-                ),
-            );
-            alert("AI Analysis Error: " + e);
-        } finally {
-            if (unlisten) {
-                unlisten();
-                unlisten = null;
-            }
-        }
+        parsingQueue.update((q) => [...q, id]);
+        processQueue();
     }
 </script>
 
 <div class="flex flex-col h-full bg-white relative dark:bg-zinc-950">
-    <div class="flex justify-between items-center p-4 border-b border-zinc-100 dark:border-zinc-800">
+    <div
+        class="flex justify-between items-center p-4 border-b border-zinc-100 dark:border-zinc-800"
+    >
         <button
             on:click={goBack}
             class="p-2 -ml-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full text-zinc-600 transition duration-100 ease-out dark:text-zinc-300 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"

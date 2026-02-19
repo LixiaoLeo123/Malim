@@ -12,13 +12,13 @@
     import { Plus, Trash2, Pencil, X } from "lucide-svelte";
     import ApiConfigModal from "./ApiConfigModel.svelte";
     import { settings } from "../lib/stores";
+    import { invoke } from "@tauri-apps/api/core";
 
     let showApiConfig = false;
 
     let contextMenuTarget: string | null = null;
     let deleteConfirmId: string | null = null;
     let pressTimer: number;
-
 
     function handleAdd() {
         // editorDraft.set({ title: '', content: '', language: 'KR' });
@@ -45,7 +45,7 @@
         clearTimeout(pressTimer);
     }
 
-    function deleteArticle(id: string) {
+    async function deleteArticle(id: string) {
         articles.update((items) => items.filter((i) => i.id !== id));
         contextMenuTarget = null;
         activeArticleId.update((currentId) => {
@@ -55,13 +55,14 @@
             }
             return currentId;
         });
+        await invoke("delete_article_audio", { id });
     }
 
     function editArticle(article: Article) {
         editorDraft.set({
             title: article.title,
             content: article.sentences
-                ? article.sentences.map((s) => s.original).join(". ")
+                ? article.sentences.map((s) => s.original).join("")
                 : "",
             language: "KR",
         });
@@ -69,6 +70,20 @@
         currentView.set("editor");
         contextMenuTarget = null;
         isSidebarOpen.set(false);
+    }
+    let listLimit = 20;
+    $: visibleArticles = $articles.slice(0, listLimit);
+
+    function handleListScroll(e: UIEvent) {
+        const target = e.currentTarget as HTMLElement;
+        if (
+            target.scrollHeight - target.scrollTop - 100 <
+            target.clientHeight
+        ) {
+            if (listLimit < $articles.length) {
+                listLimit += 10;
+            }
+        }
     }
 </script>
 
@@ -78,7 +93,11 @@
     <div
         class="p-4 border-b border-zinc-200 flex justify-between items-center bg-white dark:bg-zinc-950 dark:border-zinc-800"
     >
-        <h1 class="font-bold text-xl tracking-tight text-zinc-800 dark:text-zinc-100">Malim</h1>
+        <h1
+            class="font-bold text-xl tracking-tight text-zinc-800 dark:text-zinc-100"
+        >
+            Malim
+        </h1>
         <button
             on:click={handleAdd}
             class="p-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full transition duration-100 ease-out dark:text-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
@@ -87,8 +106,11 @@
         </button>
     </div>
 
-    <div class="flex-1 overflow-y-auto no-scrollbar p-2 space-y-2">
-        {#each $articles as article (article.id)}
+    <div
+        class="flex-1 overflow-y-auto no-scrollbar p-2 space-y-2"
+        on:scroll={handleListScroll}
+    >
+        {#each visibleArticles as article (article.id)}
             <div
                 class="relative group rounded-xl bg-white border border-zinc-100 shadow-sm overflow-hidden select-none touch-manipulation hover:shadow-md active:scale-[0.98] active:bg-zinc-100 transition duration-100 ease-out dark:bg-zinc-950 dark:border-zinc-800 dark:hover:border-zinc-700 dark:active:bg-zinc-800"
                 class:opacity-50={article.status === "parsing"}
@@ -186,7 +208,9 @@
         {/each}
     </div>
 
-    <div class="p-3 border-t border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
+    <div
+        class="p-3 border-t border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900"
+    >
         <button
             type="button"
             class="w-full flex items-center justify-center gap-2 px-3 py-2 bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98] rounded-xl text-white text-sm font-medium shadow-lg transition duration-100 ease-out dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
@@ -200,3 +224,13 @@
         <ApiConfigModal bind:open={showApiConfig} />
     </div>
 </div>
+
+<style>
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+    .no-scrollbar {
+        -ms-overflow-style: none;  /* IE and Edge */
+        scrollbar-width: none;  /* Firefox */
+    }
+</style>

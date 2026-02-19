@@ -4,12 +4,15 @@ export interface Block {
     definition: string;
     chinese_root?: string; // optional
     grammar_note?: string; // optional
+    audio_path?: string | null;
 }
 
 export interface Sentence {
     id: string;
     original: string;
     blocks: Block[];
+    translation: string;
+    audio_path?: string | null;
 }
 
 export interface Article {
@@ -34,4 +37,5 @@ export interface Settings {
     apiUrl: string;
     modelName: string;
     concurrency: number;
+    autoSpeak: boolean;
 }
