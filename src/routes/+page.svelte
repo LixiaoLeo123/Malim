@@ -6,9 +6,9 @@
     import { fade, fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
 </script>
-
+<!-- <div class="fixed top-0 left-0 right-0 h-[env(safe-area-inset-top)] bg-white dark:bg-zinc-950 z-[9999] pointer-events-none"></div> -->
 <main
-    class="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100"
+    class="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 pt-[env(safe-area-inset-top)]"
 >
     <div
         class="hidden md:block h-full w-80 shrink-0 z-20 border-r border-zinc-200 dark:border-zinc-800"
