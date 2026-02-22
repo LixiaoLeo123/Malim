@@ -33,7 +33,9 @@ export const settings = writable<Settings>({
     apiUrl: '',
     modelName: '',
     concurrency: 1,
-    autoSpeak: false
+    autoSpeak: false,
+    preCacheAudio: true,
+    ttsConcurrency: 1
 })
 
 export const parsingQueue = writable<string[]>([]); // article id

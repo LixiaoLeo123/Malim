@@ -174,12 +174,23 @@
             </button>
 
             <div
-                class="flex items-center bg-zinc-100 rounded-lg p-0.5 dark:bg-zinc-800/50"
+                class="relative inline-grid grid-cols-2 bg-zinc-100 rounded-lg p-0.5 dark:bg-zinc-800/50"
             >
+                <!-- sliding indicator -->
+                <div
+                    class="absolute top-0.5 bottom-0.5 left-0.5 w-1/2 bg-white rounded-md shadow-sm
+                           transition-transform duration-200 ease-out dark:bg-zinc-700"
+                    style="transform: translateX({viewMode === 'sentence'
+                        ? '100%'
+                        : '0%'});"
+                ></div>
+
+                <!-- Word -->
                 <button
-                    class="flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all
-                    {viewMode === 'word'
-                        ? 'bg-white text-zinc-800 shadow-sm dark:bg-zinc-700 dark:text-zinc-100'
+                    class="relative z-10 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium
+           active:scale-95 transition-all
+           {viewMode === 'word'
+                        ? 'text-zinc-800 dark:text-zinc-100'
                         : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}"
                     on:click={() => {
                         viewMode = "word";
@@ -189,11 +200,14 @@
                     <Type size={14} />
                     <span>Word</span>
                 </button>
+
+                <!-- Sentence -->
                 <button
-                    class="flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all
-                    {viewMode === 'sentence'
-                        ? 'bg-white text-zinc-800 shadow-sm dark:bg-zinc-700 dark:text-zinc-100'
-                        : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}"
+                    class="relative z-10 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium
+                           active:scale-95 transition-all
+                           {viewMode === 'sentence'
+                           ? 'text-zinc-800 dark:text-zinc-100'
+                           : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}"
                     on:click={() => {
                         viewMode = "sentence";
                         activeBlock = null;

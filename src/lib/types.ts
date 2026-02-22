@@ -38,4 +38,6 @@ export interface Settings {
     modelName: string;
     concurrency: number;
     autoSpeak: boolean;
+    preCacheAudio: boolean;
+    ttsConcurrency: number;
 }

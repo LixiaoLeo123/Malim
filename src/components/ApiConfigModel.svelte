@@ -9,6 +9,8 @@
     let tempModel = "";
     let tempConcurrency = 1;
     let tempAutoSpeak = true;
+    let tempPreCacheAudio = true;
+    let tempTtsConcurrency = 1;
 
     $: if (open) {
         tempKey = $settings.apiKey;
@@ -16,6 +18,8 @@
         tempModel = $settings.modelName;
         tempConcurrency = $settings.concurrency;
         tempAutoSpeak = $settings.autoSpeak;
+        tempPreCacheAudio = $settings.preCacheAudio;
+        tempTtsConcurrency = $settings.ttsConcurrency;
     }
 
     function handleSave() {
@@ -25,6 +29,8 @@
             modelName: tempModel.trim(),
             concurrency: tempConcurrency,
             autoSpeak: tempAutoSpeak,
+            preCacheAudio: tempPreCacheAudio,
+            ttsConcurrency: tempTtsConcurrency,
         });
         open = false;
     }
@@ -125,6 +131,8 @@
                     </style>
                 </label>
             </div>
+            <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
+            <!-- Auto Speak -->
             <div class="flex items-center justify-between mt-3">
                 <span class="text-sm text-zinc-600 dark:text-zinc-300"
                     >Auto Speak</span
@@ -145,6 +153,55 @@
                     ></span>
                 </button>
             </div>
+
+            <div class="flex items-center justify-between mt-3">
+                <span class="text-sm text-zinc-600 dark:text-zinc-300"
+                    >Pre-cache audio during parsing</span
+                >
+                <button
+                    type="button"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempPreCacheAudio
+                        ? 'bg-zinc-900 dark:bg-zinc-100'
+                        : 'bg-zinc-300 dark:bg-zinc-700'}"
+                    aria-label="Pre-cache audio during parsing"
+                    aria-pressed={tempPreCacheAudio}
+                    on:click={() => (tempPreCacheAudio = !tempPreCacheAudio)}
+                >
+                    <span
+                        class="inline-block h-5 w-5 transform rounded-full bg-white dark:bg-zinc-900 transition-transform {tempPreCacheAudio
+                            ? 'translate-x-5'
+                            : 'translate-x-1'}"
+                    ></span>
+                </button>
+            </div>
+
+            <!-- TTS Concurrency (enabled only when pre-cache is on) -->
+            <label class="block">
+                <span
+                    class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                >
+                    TTS Concurrency
+                </span>
+                <input
+                    type="number"
+                    bind:value={tempTtsConcurrency}
+                    min={1}
+                    max={10}
+                    step={1}
+                    disabled={!tempPreCacheAudio}
+                    class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style="appearance: textfield; -moz-appearance: textfield;"
+                />
+                {#if tempPreCacheAudio}
+                    <span class="block text-xs text-zinc-400 mt-1">
+                        Limits how many TTS requests run in parallel while pre-caching.
+                    </span>
+                {:else}
+                    <span class="block text-xs text-zinc-400 mt-1">
+                        Enable pre-caching to configure TTS concurrency.
+                    </span>
+                {/if}
+            </label>
 
             <div class="flex justify-end pt-2 gap-2">
                 <button

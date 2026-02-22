@@ -67,6 +67,8 @@
                 apiUrl: $settings.apiUrl,
                 modelName: $settings.modelName,
                 concurrency: $settings.concurrency,
+                ttsConcurrency: $settings.ttsConcurrency,
+                preCacheAudio: $settings.preCacheAudio,
                 oldSentences: currentArticle.sentences || null,
             });
 

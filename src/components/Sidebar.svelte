@@ -64,7 +64,7 @@
             content: article.sentences
                 ? article.sentences.map((s) => s.original).join("")
                 : "",
-            language: "KR",
+            language: article.language,
         });
         activeArticleId.set(article.id);
         currentView.set("editor");
@@ -217,7 +217,7 @@
             on:click={() => (showApiConfig = true)}
         >
             <span>
-                {$settings ? "API configured ✓" : "Configure API"}
+                {($settings.apiKey && $settings.apiUrl && $settings.modelName) ? "API configured ✓" : "Configure API"}
             </span>
         </button>
 

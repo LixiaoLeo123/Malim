@@ -1,16 +1,19 @@
+use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
+use msedge_tts::tts::{client::connect, SpeechConfig};
+use msedge_tts::voice::Voice as EdgeVoice;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
-use msedge_tts::tts::{client::connect, SpeechConfig};
-use msedge_tts::voice::Voice as EdgeVoice;
-use tokio::sync::Semaphore;
+use tokio::{
+    sync::{Mutex, Semaphore},
+    task,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WordBlock {
@@ -91,86 +94,158 @@ fn edge_tts_mp3(text: &str, voice_name: &str) -> Result<Vec<u8>, String> {
     Ok(audio.audio_bytes)
 }
 
-fn ensure_audio_cached(
+fn ensure_audio_cached_sync(
     app: &AppHandle,
     article_id: &str,
     lang: &str,
     text: &str,
-    kind: &str, // "sentence" | "block"
+    kind: &str,
 ) -> Result<String, String> {
     let voice = pick_voice(lang);
     let key = hash_key(&format!("{}|{}|{}", voice, kind, text));
     let dir = audio_dir(app, article_id)?;
     let path = dir.join(format!("{}_{}.mp3", kind, key));
 
-    if Path::new(&path).exists() {
+    if path.exists() {
         return Ok(path.to_string_lossy().to_string());
     }
 
     let audio = edge_tts_mp3(text, voice)?;
-    fs::write(&path, audio).map_err(|e| format!("write audio error: {}", e))?;
+
+    let tmp = dir.join(format!(".tmp_{}_{}.mp3", kind, key));
+    fs::write(&tmp, audio).map_err(|e| format!("write audio error: {}", e))?;
+    fs::rename(&tmp, &path).map_err(|e| format!("rename audio error: {}", e))?;
+
     Ok(path.to_string_lossy().to_string())
+}
+
+async fn ensure_audio_cached(
+    app: AppHandle,
+    article_id: Arc<String>,
+    lang: Arc<String>,
+    text: String,
+    kind: &'static str,
+    tts_sem: Arc<Semaphore>,
+    tts_locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
+) -> Result<String, String> {
+    let voice = pick_voice(&lang);
+    let key = hash_key(&format!("{}|{}|{}", voice, kind, text));
+
+    let lock = tts_locks
+        .entry(key.clone())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone();
+
+    let _guard = lock.lock().await;
+
+    let dir = audio_dir(&app, &article_id)?;
+    let path = dir.join(format!("{}_{}.mp3", kind, key));
+
+    if path.exists() {
+        return Ok(path.to_string_lossy().to_string());
+    }
+
+    let _permit = tts_sem
+        .acquire_owned()
+        .await
+        .map_err(|_| "tts semaphore closed".to_string())?;
+
+    let app2 = app.clone();
+    let article_id2 = article_id.clone();
+    let lang2 = lang.clone();
+    let text2 = text.clone();
+
+    let out_path = task::spawn_blocking(move || {
+        ensure_audio_cached_sync(&app2, &article_id2, &lang2, &text2, kind)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking join error: {}", e))??;
+
+    tts_locks.remove(&key);
+
+    Ok(out_path)
 }
 
 // --- AI ---
 fn build_prompt(lang: &str, sentence: &str) -> String {
-    let lang_target = if lang == "KR" { "Korean" } else { "Russian" };
-
-    let pos_rules = if lang == "KR" {
-        r#"
-POS Tagging (Strictly use these tags only):
-- noun: Common nouns, proper nouns.
-- pronoun: I, you, he, this, that.
-- verb: Action verbs.
-- adjective: Descriptive verbs.
-- adverb: Modifying verbs/adjectives.
-- particle: Case markers, topic markers.
-- ending: Verb endings, connectives.
-- punctuation: Periods (.), commas (,), question marks (?), exclamation marks (!).
-- unknown: If unable to determine.
-"#
-    } else {
-        "Standard Russian POS tagging (noun, verb, adj, adv, prep, conj, punctuation, etc.)."
-    };
-
-    let specific_rule = if lang == "KR" {
-        "For Sino-Korean words, providing 'chinese_root' is MANDATORY."
-    } else {
-        "For 'chinese_root', always return null."
-    };
-
-    format!(
-        r#"
+    const BASE_RULES: &str = r#"
 You are a precise JSON generator.
 STRICT RULES:
-1. Output MUST be a valid JSON object containing "translation" and "blocks" keys.
-2. Do NOT use Markdown code blocks.
+1. Your output MUST be a single, valid JSON object.
+2. Do NOT use Markdown code blocks (```json ... ```) in your final output.
 3. Use ONLY standard ASCII punctuation.
-4. Do NOT include any text outside the JSON array.
+4. Do NOT include any text outside the JSON object.
+"#;
 
-Task: Analyze the {lang_target} sentence below.
-1. TRANSLATION: Provide a natural English translation of the entire sentence.
-2. TOKENIZATION: Split into morphemes.
-   - CRITICAL: Do NOT decompose Hangul characters (Jamo).
-   - CRITICAL: Do NOT discard punctuation. Output punctuation as separate blocks with pos 'punctuation'.
-2. {pos_rules}
-3. Provide concise English definition.
-4. {specific_rule}
-
+    let (lang_target, task_rules, example) = if lang == "KR" {
+        let kr_rules = r#"
+Task: Analyze the Korean sentence below.
+1.  TRANSLATION: Provide a natural English translation of the entire sentence.
+2.  TOKENIZATION: Split into morphemes.
+    - CRITICAL: Do NOT decompose Hangul characters (Jamo).
+    - CRITICAL: Do NOT discard punctuation. Output punctuation as separate blocks with pos 'punctuation'.
+3.  POS Tagging (Strictly use these tags only):
+    - noun, pronoun, verb, adjective, adverb, particle, ending, punctuation, unknown.
+4.  DEFINITION: Provide a concise English definition for each block.
+5.  CHINESE ROOT: For Sino-Korean words, providing 'chinese_root' is MANDATORY.
+"#;
+        let kr_example = r#"
 Example Output:
 {{
     "translation": "I go to school.",
     "blocks": [
         {{ "text": "학교", "pos": "noun", "definition": "school", "chinese_root": "学校", "grammar_note": null }},
+        {{ "text": "에", "pos": "particle", "definition": "to (indicates direction)", "chinese_root": null, "grammar_note": "Location marker" }},
+        {{ "text": "갑니다", "pos": "verb", "definition": "go", "chinese_root": null, "grammar_note": "Formal, present tense" }},
         {{ "text": ".", "pos": "punctuation", "definition": ".", "chinese_root": null, "grammar_note": null }}
     ]
 }}
+"#;
+        ("Korean", kr_rules, kr_example)
+    } else {
+        let ru_rules = r#"
+You are an expert Russian linguist who ALWAYS follows JSON formatting rules.
 
+Task: Analyze the Russian sentence below.
+
+CRITICAL, NON-NEGOTIABLE RULES:
+1.  **GRAMMAR NOTE (MANDATORY!)**: For EVERY word block, you MUST provide a detailed 'grammar_note'. This is the most important instruction. Do not skip it or leave it null (except for punctuation).
+    -   For **Nouns, Pronouns, Adjectives**: MUST specify `Case`, `Number`, `Gender`.
+    -   For **Verbs**: MUST specify its `Lemma` (infinitive form), `Aspect` (Perfective/Imperfective), `Tense`, `Person`, and `Number`.
+2.  **LEMMATIZATION**: Identify the base/dictionary form (lemma) of each word. The definition should be for the lemma.
+3.  **TRANSLATION**: Provide a natural English translation of the entire sentence.
+4.  **TOKENIZATION**: Split into words and punctuation. Punctuation marks are separate blocks.
+5.  **POS TAGGING**: Use standard tags (e.g., noun, verb, adj, adv, pron, prep, conj, particle, punctuation).
+"#;
+        let ru_example = r#"
+Example Output (Follow this structure EXACTLY):
+{{
+    "translation": "I am reading an interesting book.",
+    "blocks": [
+        {{ "text": "Я", "pos": "pron", "definition": "I", "grammar_note": "Case: Nominative, Person: 1st, Number: Singular" }},
+        {{ "text": "читаю", "pos": "verb", "definition": "read", "grammar_note": "Lemma: читать, Aspect: Imperfective, Tense: Present, Person: 1st, Number: Singular" }},
+        {{ "text": "интересную", "pos": "adj", "definition": "interesting", "grammar_note": "Lemma: интересный, Case: Accusative, Number: Singular, Gender: Feminine" }},
+        {{ "text": "книгу", "pos": "noun", "definition": "book", "grammar_note": "Lemma: книга, Case: Accusative, Number: Singular, Gender: Feminine, Animacy: Inanimate" }},
+        {{ "text": ".", "pos": "punctuation", "definition": ".", "grammar_note": null }}
+    ]
+}}
+"#;
+        ("Russian", ru_rules, ru_example)
+    };
+
+    format!(
+        r#"{base_rules}
+{task_rules}
+{example}
 Sentence: "{sentence}"
-Output:
-"#
+Output:"#,
+        base_rules = BASE_RULES,
+        task_rules = task_rules,
+        example = example,
+        sentence = sentence
     )
 }
+
 
 async fn call_ai_api(
     api_key: &str,
@@ -248,6 +323,8 @@ async fn parse_text(
     api_url: String,
     model_name: String,
     concurrency: usize,
+    pre_cache_audio: bool,
+    tts_concurrency: usize,
     old_sentences: Option<Vec<Sentence>>, //as cache in edit mode
 ) -> Result<Vec<Sentence>, String> {
     if api_key.is_empty() {
@@ -267,6 +344,7 @@ async fn parse_text(
         .filter(|s| !s.is_empty())
         .collect();
 
+    dbg!(&language);
     dbg!(&raw_sentences);
 
     let total = raw_sentences.len();
@@ -277,20 +355,25 @@ async fn parse_text(
     let language = Arc::new(language);
     let id = Arc::new(id);
     let completed = Arc::new(AtomicUsize::new(0));
+    let tts_sem = Arc::new(Semaphore::new(tts_concurrency.max(1)));
+    let tts_locks: Arc<DashMap<String, Arc<Mutex<()>>>> = Arc::new(DashMap::new());
 
     let tasks = raw_sentences.into_iter().enumerate().map(|(i, raw)| {
-        let api_key = Arc::clone(&api_key);
-        let api_url = Arc::clone(&api_url);
-        let model_name = Arc::clone(&model_name);
-        let language = Arc::clone(&language);
-        let id = Arc::clone(&id);
-        let old_map = Arc::clone(&old_map);
-        let completed = Arc::clone(&completed);
+        let api_key = api_key.clone();
+        let api_url = api_url.clone();
+        let model_name = model_name.clone();
+        let language = language.clone();
+        let id = id.clone();
+        let old_map = old_map.clone();
+        let completed = completed.clone();
         let app = app.clone();
+
+        let tts_locks = tts_locks.clone();
+        let tts_sem = tts_sem.clone();
 
         async move {
             let cached = old_map.get(&raw).cloned();
-            let (blocks, translation) = if let Some(b) = cached {
+            let (mut blocks, translation) = if let Some(b) = cached {
                 (b.blocks, b.translation)
             } else {
                 let prompt = build_prompt(&language, &raw);
@@ -303,33 +386,80 @@ async fn parse_text(
                             definition: format!("Error: {}", err),
                             chinese_root: None,
                             grammar_note: None,
-                            audio_path: None
+                            audio_path: None,
                         }],
                         "Translation unavailable due to error.".to_string(),
                     ),
                 }
             };
-            // --- audio ---
-            for b in blocks.iter_mut() {
-                if b.pos == "punctuation" || b.text.trim().is_empty() {
-                    b.audio_path = None;
-                    continue;
-                }
-                match ensure_audio_cached(&app, &id, &language, &b.text, "block") {
-                    Ok(p) => b.audio_path = Some(p),
-                    Err(err) => {
-                        b.audio_path = None;
-                        dbg!(&err);
-                    }
-                }
-            }
 
-            let sentence_audio = ensure_audio_cached(&app, &id, &language, &raw, "sentence")
-                .ok();
+            // --- audio ---
+            let mut sentence_audio = None;
+            if pre_cache_audio {
+                let sentence_handle = {
+                    let app2 = app.clone();
+                    let id2 = id.clone();
+                    let lang2 = language.clone();
+                    let sem2 = tts_sem.clone();
+                    let raw2 = raw.clone();
+                    let locks2 = tts_locks.clone();
+
+                    tokio::spawn(async move {
+                        ensure_audio_cached(app2, id2, lang2, raw2, "sentence", sem2, locks2)
+                            .await
+                            .ok()
+                    })
+                };
+
+                let inner = tts_concurrency.min(8).max(1);
+
+                let block_inputs: Vec<(usize, String, String)> = blocks
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, b)| (idx, b.text.clone(), b.pos.clone()))
+                    .collect();
+
+                let app3 = app.clone();
+                let id3 = id.clone();
+                let lang3 = language.clone();
+                let sem3 = tts_sem.clone();
+                let locks3 = tts_locks.clone();
+
+                let block_paths: Vec<(usize, Option<String>)> = stream::iter(block_inputs)
+                    .map(move |(idx, text, pos)| {
+                        let app3 = app3.clone();
+                        let id3 = id3.clone();
+                        let lang3 = lang3.clone();
+                        let sem3 = sem3.clone();
+                        let locks3 = locks3.clone();
+
+                        async move {
+                            if pos == "punctuation" || text.trim().is_empty() {
+                                return (idx, None);
+                            }
+
+                            let p =
+                                ensure_audio_cached(app3, id3, lang3, text, "block", sem3, locks3)
+                                    .await
+                                    .ok();
+
+                            (idx, p)
+                        }
+                    })
+                    .buffer_unordered(inner)
+                    .collect()
+                    .await;
+
+                for (idx, p) in block_paths {
+                    blocks[idx].audio_path = p;
+                }
+
+                sentence_audio = sentence_handle.await.ok().flatten();
+            }
 
             let sentence = Sentence {
                 id: format!("{}_{}", id, i),
-                original: raw,
+                original: raw.clone(),
                 blocks,
                 translation,
                 audio_path: sentence_audio,
@@ -421,7 +551,12 @@ pub fn run() {
         .manage(AppState {
             // sentence_cache: Mutex::new(HashMap::new()),
         })
-        .invoke_handler(tauri::generate_handler![parse_text, save_data, load_data, delete_article_audio])
+        .invoke_handler(tauri::generate_handler![
+            parse_text,
+            save_data,
+            load_data,
+            delete_article_audio
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
