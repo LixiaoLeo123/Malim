@@ -91,7 +91,7 @@
     class="flex flex-col h-full bg-zinc-50 border-r border-zinc-200 w-full md:w-80 bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-800"
 >
     <div
-        class="p-4 border-b border-zinc-200 flex justify-between items-center bg-white dark:bg-zinc-950 dark:border-zinc-800"
+        class="p-4 border-b border-zinc-200 flex justify-between items-center bg-white dark:bg-zinc-950 dark:border-zinc-800 pt-[env(safe-area-inset-top)]"
     >
         <h1
             class="font-bold text-xl tracking-tight text-zinc-800 dark:text-zinc-100"

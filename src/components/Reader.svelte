@@ -46,6 +46,19 @@
             "bg-slate-50 text-slate-500 active:bg-slate-100 dark:bg-slate-800/50 dark:text-slate-200 dark:active:bg-slate-700/65",
     };
 
+    function getRussianNounOrPronounColor(block: Block) {
+        if (block.pos !== "noun" && block.pos !== "pronoun") return null;
+
+        if (block.gram_gender === "m")
+            return "bg-violet-50 text-violet-700 active:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200 dark:active:bg-violet-900/55"; // 极偏紫
+        if (block.gram_gender === "f")
+            return "bg-cyan-50 text-cyan-700 active:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-200 dark:active:bg-cyan-900/55"; // 极偏绿
+        if (block.gram_gender === "n")
+            return "bg-blue-50 text-blue-700 active:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:active:bg-blue-900/55"; // 正蓝
+
+        return colorMap["noun"];
+    }
+
     function stopAudio() {
         console.log("1");
         if (player) {
@@ -206,8 +219,8 @@
                     class="relative z-10 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium
                            active:scale-95 transition-all
                            {viewMode === 'sentence'
-                           ? 'text-zinc-800 dark:text-zinc-100'
-                           : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}"
+                        ? 'text-zinc-800 dark:text-zinc-100'
+                        : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}"
                     on:click={() => {
                         viewMode = "sentence";
                         activeBlock = null;
@@ -243,11 +256,20 @@
                             class="interactive-block px-1 py-0 mx-[2px] rounded
                             transition-transform duration-75 ease-out
                             active:scale-95
-                            {colorMap[block.pos] || colorMap['unknown']}"
+                            {getLanguageName(article?.language) === 'Russian' &&
+                            (block.pos === 'noun' || block.pos === 'pronoun')
+                                ? getRussianNounOrPronounColor(block)
+                                : colorMap[block.pos] || colorMap['unknown']}"
                             on:click={(e) =>
                                 handleBlockClick(e, block, sentence)}
                         >
                             {block.text}
+                            {#if article?.language === "RU" && (block.pos === 'noun' || block.pos === 'pronoun') && block.gram_case}
+                                <sup
+                                    class="text-[10px] ml-[1px] text-purple-500"
+                                >
+                                    {block.gram_case}
+                                </sup>{/if}
                         </button>
                     {/each}
                 </div>
@@ -283,20 +305,61 @@
                     {activeBlock.definition}
                 </div>
 
+                {#if article?.language === "RU" && activeBlock.gram_number === "pl"}
+                    <div
+                        class="absolute top-2 right-2 w-5 h-5 rounded-full bg-purple-600 text-white text-[10px] flex items-center justify-center"
+                    >
+                        P
+                    </div>
+                {/if}
+
+                {#if article?.language === "RU" && activeBlock.pos === "verb"}
+                    <div class="flex gap-2 mt-2 text-xs">
+                        {#if activeBlock.tense}
+                            <div
+                                class="inline-block self-start bg-blue-500/15 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/40"
+                            >
+                                {activeBlock.tense}
+                            </div>
+                        {/if}
+
+                        {#if activeBlock.aspect}
+                            <div
+                                class={`inline-block self-start px-1.5 py-0.5 rounded border text-xs
+                ${
+                    activeBlock.aspect === "pf"
+                        ? "bg-orange-500/15 text-orange-300 border-orange-500/40"
+                        : "bg-cyan-500/15 text-cyan-300 border-cyan-500/40"
+                }`}
+                            >
+                                {activeBlock.aspect === "pf" ? "PF" : "IPF"}
+                            </div>
+                        {/if}
+                    </div>
+                {/if}
+
+                {#if article?.language === "RU" && activeBlock.lemma}
+                    <div class="text-sm text-zinc-300 mt-1">
+                        Lemma: <span class="font-semibold"
+                            >{activeBlock.lemma}</span
+                        >
+                    </div>
+                {/if}
+
                 {#if activeBlock.grammar_note}
                     <div
                         class="text-zinc-400 text-sm border-t border-zinc-700 pt-2 mt-1"
                     >
-                        {#if isGrammarExpanded || activeBlock.grammar_note.length < 50}
-                            {activeBlock.grammar_note}
-                        {:else}
+                        <!-- {#if isGrammarExpanded || activeBlock.grammar_note.length < 50} -->
+                        {activeBlock.grammar_note}
+                        <!-- {:else}
                             {activeBlock.grammar_note.slice(0, 50)}...
                             <button
                                 class="text-blue-400 ml-1 hover:underline"
                                 on:click|stopPropagation={() =>
                                     (isGrammarExpanded = true)}>more</button
                             >
-                        {/if}
+                        {/if} -->
                     </div>
                 {/if}
             </div>
@@ -348,16 +411,31 @@
 </div>
 
 <style>
+    :global(::-webkit-scrollbar) {
+        width: 6px;
+        height: 6px;
+    }
+    :global(::-webkit-scrollbar-track) {
+        background: transparent;
+    }
+    :global(::-webkit-scrollbar-thumb) {
+        background: rgba(24, 24, 27, 0.35);
+        border-radius: 3px;
+    }
+    :global(*) {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(24, 24, 27, 0.35) transparent;
+    }
+
     :global(.dark) ::-webkit-scrollbar {
         width: 4px;
         height: 4px;
     }
-    :global(.dark) ::-webkit-scrollbar-track {
-        background: transparent;
-    }
     :global(.dark) ::-webkit-scrollbar-thumb {
         background: rgba(255, 255, 255, 0.2);
-        border-radius: 2px;
+    }
+    :global(.dark) * {
+        scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -365,22 +443,10 @@
             width: 4px;
             height: 4px;
         }
-        :global(::-webkit-scrollbar-track) {
-            background: transparent;
-        }
         :global(::-webkit-scrollbar-thumb) {
             background: rgba(255, 255, 255, 0.2);
-            border-radius: 2px;
         }
-    }
-
-    :global(.dark) * {
-        scrollbar-width: thin;
-        scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-    }
-    @media (prefers-color-scheme: dark) {
         :global(*) {
-            scrollbar-width: thin;
             scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
         }
     }

@@ -23,6 +23,13 @@ pub struct WordBlock {
     chinese_root: Option<String>,
     grammar_note: Option<String>,
     audio_path: Option<String>,
+    // Russian-specific fields:
+    lemma: Option<String>,
+    gram_case: Option<u8>,       // 1-7
+    gram_gender: Option<String>, // m / f / n
+    gram_number: Option<String>, // sg / pl
+    tense: Option<String>,       // pres / past / fut / imp / inf / gerund / ...
+    aspect: Option<String>,      // impf / pf
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +54,11 @@ pub struct AiParsedResult {
     translation: String,
     blocks: Vec<WordBlock>,
 }
+
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// struct SentenceSplitResult {
+//     sentences: Vec<String>,
+// }
 
 struct AppState {
     // sentence_cache: Mutex<HashMap<String, Vec<WordBlock>>>,
@@ -177,7 +189,7 @@ STRICT RULES:
 4. Do NOT include any text outside the JSON object.
 "#;
 
-    let (lang_target, task_rules, example) = if lang == "KR" {
+    let (_lang_target, task_rules, example) = if lang == "KR" {
         let kr_rules = r#"
 Task: Analyze the Korean sentence below.
 1.  TRANSLATION: Provide a natural English translation of the entire sentence.
@@ -204,32 +216,116 @@ Example Output:
         ("Korean", kr_rules, kr_example)
     } else {
         let ru_rules = r#"
-You are an expert Russian linguist who ALWAYS follows JSON formatting rules.
+You are a Russian linguistic analyzer for beginner learners.
+Your goal is to make Russian fully understandable.
 
-Task: Analyze the Russian sentence below.
+Return a single JSON object:
 
-CRITICAL, NON-NEGOTIABLE RULES:
-1.  **GRAMMAR NOTE (MANDATORY!)**: For EVERY word block, you MUST provide a detailed 'grammar_note'. This is the most important instruction. Do not skip it or leave it null (except for punctuation).
-    -   For **Nouns, Pronouns, Adjectives**: MUST specify `Case`, `Number`, `Gender`.
-    -   For **Verbs**: MUST specify its `Lemma` (infinitive form), `Aspect` (Perfective/Imperfective), `Tense`, `Person`, and `Number`.
-2.  **LEMMATIZATION**: Identify the base/dictionary form (lemma) of each word. The definition should be for the lemma.
-3.  **TRANSLATION**: Provide a natural English translation of the entire sentence.
-4.  **TOKENIZATION**: Split into words and punctuation. Punctuation marks are separate blocks.
-5.  **POS TAGGING**: Use standard tags (e.g., noun, verb, adj, adv, pron, prep, conj, particle, punctuation).
-"#;
+{
+  "translation": "...",
+  "blocks": [
+    {
+      "text": "...",
+      "pos": "...",
+      "definition": "...",
+      "lemma": "...",
+      "gram_case": 1-7,
+      "gram_gender": "m" | "f" | "n",
+      "gram_number": "sg" | "pl",
+      "tense": "pres" | "past" | "fut" | "imp" | "inf" | "gerund",
+      "aspect": "pf" | "impf",
+      "grammar_note": "..."
+    }
+  ]
+}
+
+FIELD RULES:
+
+1. Always include:
+   text, pos, definition.
+
+2. Include grammatical fields only if meaningful.
+   Do not include unused fields.
+
+3. POS must be:
+   noun, verb, adjective, adverb, pronoun, particle, punctuation.
+
+4. Participles → adjective.
+5. Gerunds → verb (tense = "gerund").
+
+NOUNS:
+Include lemma, gram_case, gram_gender, gram_number.
+
+PRONOUNS (Personal):
+Include lemma, gram_case, gram_gender, gram_number.
+(Note: Personal pronouns change form significantly by case and number; gender applies mainly to 3rd person singular).
+
+VERBS:
+Include lemma.
+Include tense if identifiable.
+Include aspect (pf or impf).
+
+GRAMMAR_NOTE:
+
+Explain briefly in simple English:
+- what role the word plays in the sentence
+- why its form looks like this
+- mention the ending change if relevant
+
+Do NOT repeat the lemma.
+Do NOT use rigid labels like "Base form:", "Why:", "How:".
+Write naturally and concisely.
+        "#;
         let ru_example = r#"
-Example Output (Follow this structure EXACTLY):
-{{
-    "translation": "I am reading an interesting book.",
-    "blocks": [
-        {{ "text": "Я", "pos": "pron", "definition": "I", "grammar_note": "Case: Nominative, Person: 1st, Number: Singular" }},
-        {{ "text": "читаю", "pos": "verb", "definition": "read", "grammar_note": "Lemma: читать, Aspect: Imperfective, Tense: Present, Person: 1st, Number: Singular" }},
-        {{ "text": "интересную", "pos": "adj", "definition": "interesting", "grammar_note": "Lemma: интересный, Case: Accusative, Number: Singular, Gender: Feminine" }},
-        {{ "text": "книгу", "pos": "noun", "definition": "book", "grammar_note": "Lemma: книга, Case: Accusative, Number: Singular, Gender: Feminine, Animacy: Inanimate" }},
-        {{ "text": ".", "pos": "punctuation", "definition": ".", "grammar_note": null }}
-    ]
-}}
-"#;
+Example Outputs:
+
+{
+  "translation": "I am reading an interesting book.",
+  "blocks": [
+    {
+      "text": "Я",
+      "pos": "pronoun",
+      "definition": "I",
+      "lemma": "я",
+      "gram_case": 1,
+      "gram_gender": "m",
+      "gram_number": "sg",
+      "grammar_note": "It is the subject performing the action, so it stays in its basic nominative form. Gender is neutral here as 'I' can refer to any gender."
+    },
+    {
+      "text": "читаю",
+      "pos": "verb",
+      "definition": "read",
+      "lemma": "читать",
+      "tense": "pres",
+      "aspect": "impf",
+      "grammar_note": "It shows what the subject is doing now. The infinitive ending '-ть' is replaced with '-ю' to match first person singular."
+    },
+    {
+      "text": "интересную",
+      "pos": "adjective",
+      "definition": "interesting",
+      "lemma": "интересный",
+      "grammar_note": "It describes the noun and changes its ending to agree with a feminine noun in the accusative case."
+    },
+    {
+      "text": "книгу",
+      "pos": "noun",
+      "definition": "book",
+      "lemma": "книга",
+      "gram_case": 4,
+      "gram_gender": "f",
+      "gram_number": "sg",
+      "grammar_note": "It is the direct object of the verb, so the feminine ending changes from '-а' to '-у'."
+    },
+    {
+      "text": ".",
+      "pos": "punctuation",
+      "definition": "."
+    }
+  ]
+}
+        "#;
         ("Russian", ru_rules, ru_example)
     };
 
@@ -246,6 +342,121 @@ Output:"#,
     )
 }
 
+// fn create_overlapping_chunks(text: &str, chunk_size: usize, overlap_size: usize) -> Vec<String> {
+//     let preliminary_sentences: Vec<&str> = text
+//         .split_inclusive(|c: char| c.is_ascii_punctuation() || matches!(c, '。' | '\n'))
+//         .map(|s| s.trim())
+//         .filter(|s| !s.is_empty())
+//         .collect();
+
+//     if preliminary_sentences.is_empty() {
+//         return Vec::new();
+//     }
+
+//     let mut chunks = Vec::new();
+//     let mut current_chunk = String::new();
+//     let mut current_len = 0;
+
+//     for sentence in preliminary_sentences {
+//         if current_len > 0 && current_len + sentence.len() > chunk_size {
+//             chunks.push(current_chunk.clone());
+//             let overlap_start_byte = current_chunk
+//                 .char_indices()
+//                 .rev()
+//                 .take_while(|(idx, _)| current_chunk.len() - *idx <= overlap_size)
+//                 .map(|(idx, _)| idx)
+//                 .last()
+//                 .unwrap_or(0);
+
+//             current_chunk = current_chunk[overlap_start_byte..].to_string();
+//         }
+//         current_chunk.push_str(sentence);
+//         current_len = current_chunk.len();
+//     }
+
+//     if !current_chunk.trim().is_empty() {
+//         chunks.push(current_chunk);
+//     }
+
+//     chunks
+// }
+
+// fn create_overlapping_chunks(text: &str, chunk_size: usize, overlap_size: usize) -> Vec<String> {
+//     // 1. 使用一个简单、快速的方式进行初步分割
+//     let preliminary_sentences: Vec<&str> = text
+//         .split_inclusive(|c: char| c.is_ascii_punctuation() || matches!(c, '。' | '\n'))
+//         .map(|s| s.trim())
+//         .filter(|s| !s.is_empty())
+//         .collect();
+
+//     if preliminary_sentences.is_empty() {
+//         return Vec::new();
+//     }
+
+//     let mut chunks = Vec::new();
+//     let mut current_chunk = String::new();
+//     let mut current_len = 0;
+
+//     // 2. 将初步句子组合成大小合适的文本块 (Chunks)
+//     for sentence in preliminary_sentences {
+//         if current_len > 0 && current_len + sentence.len() > chunk_size {
+//             chunks.push(current_chunk.clone());
+//             // 创建重叠部分
+//             let overlap_start_byte = current_chunk
+//                 .char_indices()
+//                 .rev()
+//                 .take_while(|(idx, _)| current_chunk.len() - *idx <= overlap_size)
+//                 .map(|(idx, _)| idx)
+//                 .last()
+//                 .unwrap_or(0);
+
+//             current_chunk = current_chunk[overlap_start_byte..].to_string();
+//         }
+//         current_chunk.push_str(sentence);
+//         current_chunk.push(' '); // 确保句子间有空格
+//         current_len = current_chunk.len();
+//     }
+
+//     // 3. 添加最后一个 chunk
+//     if !current_chunk.trim().is_empty() {
+//         chunks.push(current_chunk);
+//     }
+
+//     chunks
+// }
+
+// fn build_sentence_split_prompt(text_chunk: &str) -> String {
+//     format!(
+//         r#"You are an expert sentence boundary detector. Your task is to take a block of text and split it into a precise list of sentences.
+
+// STRICT RULES:
+// 1. Your output MUST be a single, valid JSON object.
+// 2. The JSON object must contain a single key, "sentences", which is an array of strings.
+// 3. Each string in the array must be a complete and distinct sentence.
+// 4. Do NOT alter the content or punctuation of the sentences.
+// 5. Correctly handle abbreviations (e.g., "Mr. Smith lives in the U.S.") without splitting them. A sentence must end with a terminal punctuation mark like '.', '?', '!', or be a complete thought.
+
+// Example Input Text:
+// "Hello world. This is a test... what about Mr. Jones? He lives in N.Y.C. This is the next sentence."
+
+// Example Output JSON:
+// {{
+//   "sentences": [
+//     "Hello world.",
+//     "This is a test...",
+//     "what about Mr. Jones?",
+//     "He lives in N.Y.C.",
+//     "This is the next sentence."
+//   ]
+// }}
+
+// ---
+
+// Now, process the following text block:
+// {text_chunk}
+// Output:"#
+//     )
+// }
 
 async fn call_ai_api(
     api_key: &str,
@@ -338,11 +549,31 @@ async fn parse_text(
         }
     }
     let old_map = Arc::new(old_map);
-    let raw_sentences: Vec<String> = text
-        .split_inclusive(|c| matches!(c, '.' | '。' | '!' | '?' | '\n'))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+
+    let mut raw_sentences: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        current.push(c);
+        if matches!(c, '.' | '。' | '!' | '?' | '\n') {
+            while let Some(&next_c) = chars.peek() {
+                if matches!(next_c, '.' | '。' | '!' | '?' | '\n') {
+                    current.push(chars.next().unwrap());
+                } else {
+                    break;
+                }
+            }
+            let trimmed = current.trim();
+            if !trimmed.is_empty() {
+                raw_sentences.push(trimmed.to_string());
+            }
+            current.clear();
+        }
+    }
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        raw_sentences.push(trimmed.to_string());
+    }
 
     dbg!(&language);
     dbg!(&raw_sentences);
@@ -373,7 +604,11 @@ async fn parse_text(
 
         async move {
             let cached = old_map.get(&raw).cloned();
-            let (mut blocks, translation) = if let Some(b) = cached {
+            let (mut blocks, translation) = if cached
+                .as_ref()
+                .map_or(false, |b| !b.translation.starts_with('$'))
+            {
+                let b = cached.unwrap();
                 (b.blocks, b.translation)
             } else {
                 let prompt = build_prompt(&language, &raw);
@@ -387,8 +622,14 @@ async fn parse_text(
                             chinese_root: None,
                             grammar_note: None,
                             audio_path: None,
+                            lemma: None,
+                            gram_case: None,
+                            gram_gender: None,
+                            gram_number: None,
+                            tense: None,
+                            aspect: None,
                         }],
-                        "Translation unavailable due to error.".to_string(),
+                        "$Translation unavailable due to error.".to_string(),
                     ),
                 }
             };

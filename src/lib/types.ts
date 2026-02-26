@@ -2,9 +2,16 @@ export interface Block {
     text: string;
     pos: string; // word class
     definition: string;
-    chinese_root?: string; // optional
-    grammar_note?: string; // optional
+    chinese_root?: string;
+    grammar_note?: string;
     audio_path?: string | null;
+    // Russian-specific fields:
+    lemma?: string | null;
+    gram_case?: number | null;
+    gram_gender?: "m" | "f" | "n" | null;
+    gram_number?: "sg" | "pl" | null;
+    tense?: string | null;
+    aspect?: "pf" | "impf" | null;
 }
 
 export interface Sentence {
