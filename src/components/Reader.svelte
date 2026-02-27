@@ -29,17 +29,11 @@
             "bg-indigo-50 text-indigo-700 active:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-200 dark:active:bg-indigo-900/55",
         verb: "bg-red-50 text-red-700 active:bg-red-100 dark:bg-red-950/40 dark:text-red-200 dark:active:bg-red-900/55",
         adjective:
-            "bg-rose-50 text-rose-700 active:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:active:bg-rose-900/55",
+            "bg-amber-50 text-amber-700 active:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:active:bg-amber-900/55",
         adverb: "bg-emerald-50 text-emerald-700 active:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:active:bg-emerald-900/55",
-        determiner:
-            "bg-sky-50 text-sky-700 active:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-200 dark:active:bg-sky-900/55",
-        number: "bg-violet-50 text-violet-700 active:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200 dark:active:bg-violet-900/55",
         particle:
             "bg-zinc-100 text-zinc-600 active:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-200 dark:active:bg-zinc-700/70",
         ending: "bg-gray-100 text-gray-600 active:bg-gray-200 dark:bg-gray-800/60 dark:text-gray-200 dark:active:bg-gray-700/70",
-        suffix: "bg-slate-100 text-slate-600 active:bg-slate-200 dark:bg-slate-800/60 dark:text-slate-200 dark:active:bg-slate-700/70",
-        interjection:
-            "bg-amber-50 text-amber-700 active:bg-amber-100 dark:bg-amber-950/35 dark:text-amber-200 dark:active:bg-amber-900/55",
         punctuation:
             "bg-transparent text-zinc-400 cursor-default dark:text-zinc-500",
         unknown:
@@ -50,11 +44,11 @@
         if (block.pos !== "noun" && block.pos !== "pronoun") return null;
 
         if (block.gram_gender === "m")
-            return "bg-violet-50 text-violet-700 active:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200 dark:active:bg-violet-900/55"; // 极偏紫
+            return "bg-violet-50 text-violet-700 active:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200 dark:active:bg-violet-900/55";
         if (block.gram_gender === "f")
-            return "bg-cyan-50 text-cyan-700 active:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-200 dark:active:bg-cyan-900/55"; // 极偏绿
+            return "bg-cyan-50 text-cyan-700 active:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-200 dark:active:bg-cyan-900/55";
         if (block.gram_gender === "n")
-            return "bg-blue-50 text-blue-700 active:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:active:bg-blue-900/55"; // 正蓝
+            return "bg-blue-50 text-blue-700 active:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:active:bg-blue-900/55";
 
         return colorMap["noun"];
     }
@@ -264,7 +258,7 @@
                                 handleBlockClick(e, block, sentence)}
                         >
                             {block.text}
-                            {#if article?.language === "RU" && (block.pos === 'noun' || block.pos === 'pronoun') && block.gram_case}
+                            {#if article?.language === "RU" && (block.pos === "noun" || block.pos === "pronoun") && block.gram_case}
                                 <sup
                                     class="text-[10px] ml-[1px] text-purple-500"
                                 >

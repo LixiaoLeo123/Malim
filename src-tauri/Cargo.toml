@@ -29,4 +29,5 @@ sha2 = "0.10"
 hex = "0.4"
 msedge-tts = "0.2"
 dashmap = "6"
+unicode-normalization = "0.1"
 openssl-sys = { version = "0.9", features = ["vendored"] }

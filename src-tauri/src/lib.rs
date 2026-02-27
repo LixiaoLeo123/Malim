@@ -14,6 +14,7 @@ use tokio::{
     sync::{Mutex, Semaphore},
     task,
 };
+use unicode_normalization::UnicodeNormalization;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WordBlock {
@@ -91,6 +92,13 @@ fn audio_dir(app: &AppHandle, article_id: &str) -> Result<PathBuf, String> {
 }
 
 fn edge_tts_mp3(text: &str, voice_name: &str) -> Result<Vec<u8>, String> {
+    let clean_text: String = text.nfd()
+        .filter(|c| {
+            let cp = *c as u32;
+            !(0x0300..=0x036F).contains(&cp)
+        })
+        .collect();  // remove diacritics to improve TTS consistency, especially for Russian stress marks
+
     let mut client = connect().map_err(|e| format!("edge tts connect error: {}", e))?;
 
     let voice_json = format!(r#"{{"Name":"{}"}}"#, voice_name);
@@ -100,7 +108,7 @@ fn edge_tts_mp3(text: &str, voice_name: &str) -> Result<Vec<u8>, String> {
     let config = SpeechConfig::from(&voice);
 
     let audio = client
-        .synthesize(text, &config)
+        .synthesize(&clean_text, &config) 
         .map_err(|e| format!("edge tts synthesize error: {}", e))?;
 
     Ok(audio.audio_bytes)
@@ -239,6 +247,11 @@ Return a single JSON object:
   ]
 }
 
+CORE PRINCIPLE:
+**Context determines grammar.**
+You must analyze SYNTAX (verb government, prepositions) to determine Case.
+Do NOT rely solely on word endings.
+
 FIELD RULES:
 
 1. Always include:
@@ -247,23 +260,46 @@ FIELD RULES:
 2. Include grammatical fields only if meaningful.
    Do not include unused fields.
 
-3. POS must be:
-   noun, verb, adjective, adverb, pronoun, particle, punctuation.
+3. **Stress Marks**:
+   You MUST add stress marks (acute accents) to Russian words in the `text` and `lemma` fields.
+   - Mark the stressed vowel with an acute accent (e.g., "кни́га", "чита́ть").
+   - Do NOT add stress to monosyllabic words (e.g., "я", "в", "на") unless necessary for disambiguation.
+   - Do NOT add stress to numbers or English words.
 
-4. Participles → adjective.
-5. Gerunds → verb (tense = "gerund").
+4. POS must be:
+   noun, verb, adjective, adverb, pronoun, particle, punctuation, unknown.
 
-NOUNS:
+5. Participles → adjective.
+6. Gerunds → verb (tense = "gerund").
+
+CATEGORY-SPECIFIC LOGIC:
+
+**NOUNS**:
 Include lemma, gram_case, gram_gender, gram_number.
+- **Case Logic**: Check prepositions and verb government.
+  - "в/на" + location = Case 6.
+  - "в/на" + motion = Case 4.
+  - Transitive verb + direct object = Case 4.
+  - "нет" + noun = Case 2.
 
-PRONOUNS (Personal):
-Include lemma, gram_case, gram_gender, gram_number.
-(Note: Personal pronouns change form significantly by case and number; gender applies mainly to 3rd person singular).
+**ADJECTIVES**:
+Include lemma.
+**CRITICAL RESTRICTION**: Do NOT include `gram_case`, `gram_gender`, or `gram_number` for adjectives.
+- Simply identify the word as an adjective and provide its base form (lemma).
+- Ensure the POS is correct. If it modifies a noun, it is an adjective, not a noun or verb.
 
-VERBS:
+**VERBS**:
 Include lemma.
 Include tense if identifiable.
 Include aspect (pf or impf).
+**Lemma Logic**:
+- The `lemma` MUST always be the **Infinitive** (the uninflected "unfinished" base form).
+- For **Perfective verbs**, provide the Perfective Infinitive (e.g., for "напишу́", lemma is "написа́ть").
+- For **Imperfective verbs**, provide the Imperfective Infinitive (e.g., for "чита́ю", lemma is "чита́ть").
+
+**PRONOUNS (Personal)**:
+Include lemma, gram_case, gram_gender, gram_number.
+- For 1st/2nd person ("я", "ты"), gender defaults to "m" unless context (like a past-tense verb) proves otherwise.
 
 GRAMMAR_NOTE:
 
@@ -290,33 +326,33 @@ Example Outputs:
       "gram_case": 1,
       "gram_gender": "m",
       "gram_number": "sg",
-      "grammar_note": "It is the subject performing the action, so it stays in its basic nominative form. Gender is neutral here as 'I' can refer to any gender."
+      "grammar_note": "It is the subject of the sentence. Gender defaults to masculine as there is no past-tense verb to indicate otherwise."
     },
     {
-      "text": "читаю",
+      "text": "чита́ю",
       "pos": "verb",
       "definition": "read",
-      "lemma": "читать",
+      "lemma": "чита́ть",
       "tense": "pres",
       "aspect": "impf",
-      "grammar_note": "It shows what the subject is doing now. The infinitive ending '-ть' is replaced with '-ю' to match first person singular."
+      "grammar_note": "It shows the action. The ending '-ю' indicates first person singular."
     },
     {
-      "text": "интересную",
+      "text": "интере́сную",
       "pos": "adjective",
       "definition": "interesting",
-      "lemma": "интересный",
-      "grammar_note": "It describes the noun and changes its ending to agree with a feminine noun in the accusative case."
+      "lemma": "интере́сный",
+      "grammar_note": "It modifies the noun. The ending '-ую' shows it is feminine and in the accusative case."
     },
     {
-      "text": "книгу",
+      "text": "кни́гу",
       "pos": "noun",
       "definition": "book",
-      "lemma": "книга",
+      "lemma": "кни́га",
       "gram_case": 4,
       "gram_gender": "f",
       "gram_number": "sg",
-      "grammar_note": "It is the direct object of the verb, so the feminine ending changes from '-а' to '-у'."
+      "grammar_note": "It is the direct object of the verb 'read', so it takes the accusative case. The ending shifts from '-а' to '-у'."
     },
     {
       "text": ".",
@@ -326,6 +362,8 @@ Example Outputs:
   ]
 }
         "#;
+
+
         ("Russian", ru_rules, ru_example)
     };
 
