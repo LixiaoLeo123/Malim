@@ -31,6 +31,10 @@
         adjective:
             "bg-amber-50 text-amber-700 active:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:active:bg-amber-900/55",
         adverb: "bg-emerald-50 text-emerald-700 active:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:active:bg-emerald-900/55",
+        preposition:
+            "bg-gray-100 text-gray-600 active:bg-gray-200 dark:bg-gray-800/60 dark:text-gray-200 dark:active:bg-gray-700/70",
+        conjunction:
+            "bg-gray-100 text-gray-600 active:bg-gray-200 dark:bg-gray-800/60 dark:text-gray-200 dark:active:bg-gray-700/70",
         particle:
             "bg-zinc-100 text-zinc-600 active:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-200 dark:active:bg-zinc-700/70",
         ending: "bg-gray-100 text-gray-600 active:bg-gray-200 dark:bg-gray-800/60 dark:text-gray-200 dark:active:bg-gray-700/70",

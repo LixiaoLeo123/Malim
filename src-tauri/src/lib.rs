@@ -249,7 +249,7 @@ Return a single JSON object:
 
 CORE PRINCIPLE:
 **Context determines grammar.**
-You must analyze SYNTAX (verb government, prepositions) to determine Case.
+You must analyze SYNTAX (verb government, prepositions, quantifiers) to determine Case.
 Do NOT rely solely on word endings.
 
 FIELD RULES:
@@ -266,8 +266,17 @@ FIELD RULES:
    - Do NOT add stress to monosyllabic words (e.g., "я", "в", "на") unless necessary for disambiguation.
    - Do NOT add stress to numbers or English words.
 
-4. POS must be:
-   noun, verb, adjective, adverb, pronoun, particle, punctuation, unknown.
+4. **POS must be one of the following**:
+   - noun
+   - verb
+   - adjective
+   - adverb
+   - pronoun
+   - preposition (e.g., в, на, к, о)
+   - conjunction (e.g., и, а, но)
+   - particle
+   - punctuation
+   - unknown
 
 5. Participles → adjective.
 6. Gerunds → verb (tense = "gerund").
@@ -276,30 +285,31 @@ CATEGORY-SPECIFIC LOGIC:
 
 **NOUNS**:
 Include lemma, gram_case, gram_gender, gram_number.
-- **Case Logic**: Check prepositions and verb government.
-  - "в/на" + location = Case 6.
-  - "в/на" + motion = Case 4.
-  - Transitive verb + direct object = Case 4.
-  - "нет" + noun = Case 2.
+**Case Logic (CRITICAL)**:
+- Check the PREPOSITION. E.g., "в/на" + location = Case 6; "в/на" + motion = Case 4.
+- Check the VERB. E.g., transitive verbs usually take Case 4 for direct objects.
+- Check for NEGATION (e.g., "нет"). "нет" + noun = Case 2.
+- Check for QUANTIFIERS. Words like "много" (many/much), "немного" (a little), "мало" (few), "сколько" (how much/many) **ALWAYS** govern Case 2 (Genitive).
+  - Example: "немного та́йны" -> "та́йны" is Case 2 (Genitive Singular), NOT Nominative.
 
 **ADJECTIVES**:
 Include lemma.
 **CRITICAL RESTRICTION**: Do NOT include `gram_case`, `gram_gender`, or `gram_number` for adjectives.
 - Simply identify the word as an adjective and provide its base form (lemma).
-- Ensure the POS is correct. If it modifies a noun, it is an adjective, not a noun or verb.
+- Ensure the POS is correct. If it modifies a noun, it is an adjective.
 
 **VERBS**:
 Include lemma.
 Include tense if identifiable.
 Include aspect (pf or impf).
 **Lemma Logic**:
-- The `lemma` MUST always be the **Infinitive** (the uninflected "unfinished" base form).
+- The `lemma` MUST always be the **Infinitive** (the uninflected base form).
 - For **Perfective verbs**, provide the Perfective Infinitive (e.g., for "напишу́", lemma is "написа́ть").
 - For **Imperfective verbs**, provide the Imperfective Infinitive (e.g., for "чита́ю", lemma is "чита́ть").
 
 **PRONOUNS (Personal)**:
 Include lemma, gram_case, gram_gender, gram_number.
-- For 1st/2nd person ("я", "ты"), gender defaults to "m" unless context (like a past-tense verb) proves otherwise.
+- For 1st/2nd person ("я", "ты"), gender defaults to "m" unless context proves otherwise.
 
 GRAMMAR_NOTE:
 
@@ -316,43 +326,41 @@ Write naturally and concisely.
 Example Outputs:
 
 {
-  "translation": "I am reading an interesting book.",
+  "translation": "There is a little mystery on the table.",
   "blocks": [
     {
-      "text": "Я",
-      "pos": "pronoun",
-      "definition": "I",
-      "lemma": "я",
-      "gram_case": 1,
+      "text": "На",
+      "pos": "preposition",
+      "definition": "on",
+      "lemma": "на",
+      "grammar_note": "Governs the Prepositional case when indicating location."
+    },
+    {
+      "text": "столе́",
+      "pos": "noun",
+      "definition": "table",
+      "lemma": "сто́л",
+      "gram_case": 6,
       "gram_gender": "m",
       "gram_number": "sg",
-      "grammar_note": "It is the subject of the sentence. Gender defaults to masculine as there is no past-tense verb to indicate otherwise."
+      "grammar_note": "Prepositional case indicating location. Note the stress shifts to the ending."
     },
     {
-      "text": "чита́ю",
-      "pos": "verb",
-      "definition": "read",
-      "lemma": "чита́ть",
-      "tense": "pres",
-      "aspect": "impf",
-      "grammar_note": "It shows the action. The ending '-ю' indicates first person singular."
+      "text": "немно́го",
+      "pos": "adverb",
+      "definition": "a little",
+      "lemma": "немно́го",
+      "grammar_note": "Quantifier acting as an adverb, modifying the quantity of the noun."
     },
     {
-      "text": "интере́сную",
-      "pos": "adjective",
-      "definition": "interesting",
-      "lemma": "интере́сный",
-      "grammar_note": "It modifies the noun. The ending '-ую' shows it is feminine and in the accusative case."
-    },
-    {
-      "text": "кни́гу",
+      "text": "та́йны",
       "pos": "noun",
-      "definition": "book",
-      "lemma": "кни́га",
-      "gram_case": 4,
+      "definition": "mystery",
+      "lemma": "та́йна",
+      "gram_case": 2,
       "gram_gender": "f",
       "gram_number": "sg",
-      "grammar_note": "It is the direct object of the verb 'read', so it takes the accusative case. The ending shifts from '-а' to '-у'."
+      "grammar_note": "Genitive case governed by the quantifier 'немного'. The ending '-ы' is genitive singular."
     },
     {
       "text": ".",
