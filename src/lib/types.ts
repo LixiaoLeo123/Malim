@@ -47,4 +47,8 @@ export interface Settings {
     autoSpeak: boolean;
     preCacheAudio: boolean;
     ttsConcurrency: number;
+    ttsApi: "edge-tts" | "qwen3-tts" | "silero-tts";
+    qwenApiKey: string;
+    qwenVoice: string;
+    sileroUrl: string;
 }

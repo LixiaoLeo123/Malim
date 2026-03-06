@@ -35,7 +35,11 @@ export const settings = writable<Settings>({
     concurrency: 1,
     autoSpeak: false,
     preCacheAudio: true,
-    ttsConcurrency: 1
+    ttsConcurrency: 1,
+    ttsApi: "edge-tts",
+    qwenApiKey: '',
+    qwenVoice: '',
+    sileroUrl: ''
 })
 
 export const parsingQueue = writable<string[]>([]); // article id

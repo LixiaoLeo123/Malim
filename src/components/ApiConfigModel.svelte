@@ -2,7 +2,11 @@
     import { fly, fade } from "svelte/transition";
     import { settings } from "../lib/stores";
 
+    import { ChevronDown } from "lucide-svelte";
+    import { slide } from "svelte/transition";
     export let open = false;
+
+    let showTtsApiSelector = false;
 
     let tempKey = "";
     let tempUrl = "";
@@ -12,6 +16,13 @@
     let tempPreCacheAudio = true;
     let tempTtsConcurrency = 1;
 
+    type TtsApi = "edge-tts" | "qwen3-tts" | "silero-tts";
+    let tempTtsApi: TtsApi = "edge-tts";
+
+    let tempSileroUrl = "http://127.0.0.1:8001";
+    let tempQwenApiKey = "";
+    let tempQwenVoice = "";
+
     $: if (open) {
         tempKey = $settings.apiKey;
         tempUrl = $settings.apiUrl;
@@ -20,6 +31,10 @@
         tempAutoSpeak = $settings.autoSpeak;
         tempPreCacheAudio = $settings.preCacheAudio;
         tempTtsConcurrency = $settings.ttsConcurrency;
+        tempTtsApi = $settings.ttsApi ?? "edge-tts";
+        tempSileroUrl = $settings.sileroUrl ?? "http://127.0.0.1:8001";
+        tempQwenApiKey = $settings.qwenApiKey;
+        tempQwenVoice = $settings.qwenVoice;
     }
 
     function handleSave() {
@@ -31,6 +46,10 @@
             autoSpeak: tempAutoSpeak,
             preCacheAudio: tempPreCacheAudio,
             ttsConcurrency: tempTtsConcurrency,
+            ttsApi: tempTtsApi,
+            sileroUrl: tempSileroUrl.trim(),
+            qwenApiKey: tempQwenApiKey.trim(),
+            qwenVoice: tempQwenVoice.trim(),
         });
         open = false;
     }
@@ -51,8 +70,10 @@
         class="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden dark:bg-zinc-900"
         transition:fly={{ y: 20, duration: 200 }}
     >
-        <div class="p-6 space-y-4">
-            <h2 class="text-lg font-semibold text-zinc-800 dark:text-zinc-100">
+        <div class="overflow-y-auto px-6 pb-6 space-y-4" style="height: 80vh;">
+            <h2
+                class="pt-5 text-lg font-semibold text-zinc-800 dark:text-zinc-100"
+            >
                 API Configuration
             </h2>
 
@@ -81,7 +102,7 @@
                         type="text"
                         bind:value={tempUrl}
                         class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
-                        placeholder="https://llmapi.paratera.com/v1"
+                        placeholder=""
                     />
                 </label>
 
@@ -174,51 +195,164 @@
                     ></span>
                 </button>
             </div>
+            {#if tempPreCacheAudio}
+                <!-- TTS Concurrency (enabled only when pre-cache is on) -->
+                <label class="block">
+                    <span
+                        class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                    >
+                        TTS Concurrency
+                    </span>
+                    <input
+                        type="number"
+                        bind:value={tempTtsConcurrency}
+                        min={1}
+                        max={10}
+                        step={1}
+                        disabled={!tempPreCacheAudio}
+                        class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        style="appearance: textfield; -moz-appearance: textfield;"
+                    />
+                    <span class="block text-xs text-zinc-400 mt-1">
+                        Limits how many TTS requests run in parallel while
+                        pre-caching.
+                    </span>
+                </label>
 
-            <!-- TTS Concurrency (enabled only when pre-cache is on) -->
-            <label class="block">
-                <span
-                    class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
-                >
-                    TTS Concurrency
-                </span>
-                <input
-                    type="number"
-                    bind:value={tempTtsConcurrency}
-                    min={1}
-                    max={10}
-                    step={1}
-                    disabled={!tempPreCacheAudio}
-                    class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                    style="appearance: textfield; -moz-appearance: textfield;"
-                />
-                {#if tempPreCacheAudio}
-                    <span class="block text-xs text-zinc-400 mt-1">
-                        Limits how many TTS requests run in parallel while pre-caching.
+                <label class="block relative z-20">
+                    <span
+                        class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                    >
+                        TTS API
                     </span>
-                {:else}
-                    <span class="block text-xs text-zinc-400 mt-1">
-                        Enable pre-caching to configure TTS concurrency.
-                    </span>
+
+                    <button
+                        type="button"
+                        on:click={() =>
+                            (showTtsApiSelector = !showTtsApiSelector)}
+                        class="w-full flex items-center justify-between px-3 py-2 bg-zinc-100 rounded-lg text-sm font-medium hover:bg-zinc-200 transition text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                    >
+                        <span>
+                            {#if tempTtsApi === "edge-tts"}
+                                Edge TTS
+                            {:else if tempTtsApi === "qwen3-tts"}
+                                Qwen3 TTS
+                            {:else if tempTtsApi === "silero-tts"}
+                                Silero TTS
+                            {/if}
+                        </span>
+                        <ChevronDown
+                            size={16}
+                            class="transition-transform duration-200 {showTtsApiSelector
+                                ? 'rotate-180'
+                                : ''}"
+                        />
+                    </button>
+
+                    {#if showTtsApiSelector}
+                        <div
+                            transition:slide={{ duration: 200 }}
+                            class="absolute top-full left-0 mt-2 w-full bg-white border border-zinc-200 rounded-xl shadow-xl overflow-hidden z-50 dark:bg-zinc-900 dark:border-zinc-700"
+                        >
+                            <button
+                                type="button"
+                                class="w-full text-left px-4 py-2 hover:bg-zinc-50 flex items-center space-x-3 text-sm text-zinc-700 dark:hover:bg-zinc-800 dark:text-zinc-200"
+                                on:click={() => {
+                                    tempTtsApi = "edge-tts";
+                                    showTtsApiSelector = false;
+                                }}
+                            >
+                                <span>Edge TTS</span>
+                            </button>
+                            <button
+                                type="button"
+                                class="w-full text-left px-4 py-2 hover:bg-zinc-50 flex items-center space-x-3 text-sm text-zinc-700 dark:hover:bg-zinc-800 dark:text-zinc-200"
+                                on:click={() => {
+                                    tempTtsApi = "qwen3-tts";
+                                    showTtsApiSelector = false;
+                                }}
+                            >
+                                <span>Qwen3 TTS</span>
+                            </button>
+                            <button
+                                type="button"
+                                class="w-full text-left px-4 py-2 hover:bg-zinc-50 flex items-center space-x-3 text-sm text-zinc-700 dark:hover:bg-zinc-800 dark:text-zinc-200"
+                                on:click={() => {
+                                    tempTtsApi = "silero-tts";
+                                    showTtsApiSelector = false;
+                                }}
+                            >
+                                <span>Silero TTS</span>
+                            </button>
+                        </div>
+                    {/if}
+                </label>
+
+                {#if tempTtsApi === "qwen3-tts"}
+                    <label class="block">
+                        <span
+                            class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                        >
+                            Qwen TTS API Key
+                        </span>
+                        <input
+                            type="password"
+                            bind:value={tempQwenApiKey}
+                            class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
+                            placeholder="Paste your Qwen TTS API key"
+                        />
+                    </label>
+
+                    <label class="block">
+                        <span
+                            class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                        >
+                            Qwen TTS Voice Instruction
+                        </span>
+                        <input
+                            type="text"
+                            bind:value={tempQwenVoice}
+                            class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
+                            placeholder="Better use Chinese"
+                        />
+                    </label>
+                {:else if tempTtsApi === "silero-tts"}
+                    <label class="block">
+                        <span
+                            class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                        >
+                            Silero Server URL
+                        </span>
+                        <input
+                            type="text"
+                            bind:value={tempSileroUrl}
+                            class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
+                            placeholder="http://127.0.0.1:8001"
+                        />
+                        <span class="block text-xs text-zinc-400 mt-1">
+                            Enter the address of your Silero TTS server (e.g.,
+                            http://127.0.0.1:8001)
+                        </span>
+                    </label>
                 {/if}
-            </label>
 
-            <div class="flex justify-end pt-2 gap-2">
-                <button
-                    type="button"
-                    class="px-4 py-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-                    on:click={() => (open = false)}
-                >
-                    Cancel
-                </button>
-                <button
-                    type="button"
-                    class="px-4 py-1.5 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg active:scale-95 transition duration-100 ease-out dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                    on:click={handleSave}
-                >
-                    Save
-                </button>
-            </div>
+                <div class="flex justify-end pt-2 gap-2">
+                    <button
+                        type="button"
+                        class="px-4 py-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                        on:click={() => (open = false)}
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        class="px-4 py-1.5 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg active:scale-95 transition duration-100 ease-out dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                        on:click={handleSave}
+                    >
+                        Save
+                    </button>
+                </div>
+            {/if}
         </div>
     </div>
 {/if}

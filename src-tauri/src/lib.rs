@@ -2,6 +2,7 @@ use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
 use msedge_tts::tts::{client::connect, SpeechConfig};
 use msedge_tts::voice::Voice as EdgeVoice;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -14,6 +15,7 @@ use tokio::{
     sync::{Mutex, Semaphore},
     task,
 };
+use unic_emoji_char::is_emoji;
 use unicode_normalization::UnicodeNormalization;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,11 +67,254 @@ struct AppState {
     // sentence_cache: Mutex<HashMap<String, Vec<WordBlock>>>,
 }
 
-// --- TTS ---
-fn pick_voice(lang: &str) -> &'static str {
-    match lang {
-        "KR" => "ko-KR-SunHiNeural",
-        "RU" => "ru-RU-SvetlanaNeural",
+#[derive(Serialize)]
+struct TtsRequest {
+    model: String,
+    input: TtsInput,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parameters: Option<TtsParameters>,
+}
+
+#[derive(Serialize)]
+struct TtsInput {
+    text: String,
+    voice: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language_type: Option<String>,
+}
+
+#[derive(Serialize)]
+struct TtsParameters {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instructions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    optimize_instructions: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct TtsResponse {
+    #[serde(default)]
+    status_code: Option<u16>,
+
+    #[serde(default)]
+    request_id: Option<String>,
+
+    #[serde(default)]
+    code: Option<String>,
+
+    #[serde(default)]
+    message: Option<String>,
+
+    #[serde(default)]
+    output: Option<TtsOutput>,
+
+    #[serde(default)]
+    usage: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct TtsOutput {
+    #[serde(default)]
+    finish_reason: Option<String>,
+
+    #[serde(default)]
+    audio: Option<TtsAudio>,
+}
+
+#[derive(Deserialize)]
+struct TtsAudio {
+    #[serde(default)]
+    url: Option<String>,
+
+    #[serde(default)]
+    data: Option<String>,
+
+    #[serde(default)]
+    id: Option<String>,
+
+    #[serde(default)]
+    expires_at: Option<i64>,
+}
+
+// --- for Silero TTS ---
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SileroTtsRequest {
+    pub text: String,
+    pub speaker: String,
+    pub sample_rate: u32,
+    pub put_accent: bool,
+    pub put_yo: bool,
+}
+
+async fn generate_tts_audio(
+    text: &str,
+    voice: &str,
+    api_type: &str,
+    api_key: &str,
+    qwen_voice: &str,
+    silero_server_url: &str,
+) -> Result<Vec<u8>, String> {
+    match api_type {
+        "qwen3-tts" => qwen_tts_mp3(text, voice, api_key, qwen_voice).await,
+        "silero-tts" => silero_tts_mp3(silero_server_url,
+            text, voice, 48000, true, true).await,
+        _ => edge_tts_mp3(text, voice).await,
+    }
+}
+// --- silero TTS ---
+async fn silero_tts_mp3(
+    server_url: &str,
+    text: &str,
+    speaker: &str,
+    sample_rate: u32,
+    put_accent: bool,
+    put_yo: bool,
+) -> Result<Vec<u8>, String> {
+    let client = Client::new();
+
+    let req = SileroTtsRequest {
+        text: text.to_string(),
+        speaker: speaker.to_string(),
+        sample_rate,
+        put_accent,
+        put_yo,
+    };
+
+    let url = format!("{}/tts", server_url.trim_end_matches('/'));
+
+    let resp = client
+        .post(&url)
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| format!("Silero TTS send error: {}", e))?
+        .error_for_status()
+        .map_err(|e| format!("Silero TTS request error: {}", e))?;
+
+    let audio_bytes = resp.bytes()
+        .await
+        .map_err(|e| format!("Silero TTS parse error: {}", e))?
+        .to_vec();
+    Ok(audio_bytes)
+}
+// --- qwen TTS ---
+pub async fn qwen_tts_mp3(
+    text: &str,
+    voice: &str,
+    api_key: &str,
+    qwen_voice: &str,
+) -> Result<Vec<u8>, String> {
+    let client = Client::new();
+    let url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation" ;
+    let model = if qwen_voice.is_empty() {
+        "qwen3-tts-flash".to_string()
+    } else {
+        "qwen3-tts-instruct-flash".to_string()
+    };
+    let parameters = if !qwen_voice.is_empty() {
+        Some(TtsParameters {
+            instructions: Some(qwen_voice.to_string()),
+            optimize_instructions: Some(true),
+            stream: Some(false),
+        })
+    } else {
+        None
+    };
+
+    let payload = TtsRequest {
+        model,
+        input: TtsInput {
+            text: text.to_string(),
+            voice: voice.to_string(),
+            language_type: None,
+        },
+        parameters,
+    };
+
+    let resp = client
+        .post(url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request to DashScope API: {}", e))?;
+
+    let response_text = resp.text().await
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    let tts_resp: TtsResponse = serde_json::from_str(&response_text)
+        .map_err(|e| {
+            format!(
+                "Failed to parse JSON. Error: {}. Body: {}",
+                e, response_text
+            )
+        })?;
+
+
+    if let Some(code) = &tts_resp.code {
+        if !code.is_empty() {
+            let msg = tts_resp.message.as_deref().unwrap_or("");
+            let request_id = tts_resp.request_id.as_deref().unwrap_or("");
+            return Err(format!(
+                "DashScope API error: code={}, message={}, request_id={}",
+                code, msg, request_id
+            ));
+        }
+    }
+
+    if let Some(status) = tts_resp.status_code {
+        if status != 200 {
+            let msg = tts_resp.message.as_deref().unwrap_or("");
+            let request_id = tts_resp.request_id.as_deref().unwrap_or("");
+            return Err(format!(
+                "DashScope API HTTP error: status_code={}, message={}, request_id={}",
+                status, msg, request_id
+            ));
+        }
+    }
+
+    let audio_url = tts_resp
+        .output
+        .and_then(|o| o.audio)
+        .and_then(|a| a.url)
+        .ok_or_else(|| {
+            format!(
+                "API response missing 'output.audio.url'. Body: {}",
+                response_text
+            )
+        })?;
+
+    let audio_bytes = client
+        .get(&audio_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download audio from URL: {}", e))?
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read audio bytes: {}", e))?;
+
+    Ok(audio_bytes.to_vec())
+}
+
+
+// --- edge TTS ---
+fn pick_voice(lang: &str, tts_api: &str) -> &'static str {
+    match tts_api {
+        "qwen3-tts" => match lang {
+            "KR" => "Cherry",
+            "RU" => "Neil",
+            _ => "en-US-JennyNeural",
+        },
+        "edge-tts" => match lang {
+            "KR" => "ko-KR-SunHiNeural",
+            "RU" => "ru-RU-SvetlanaNeural",
+            _ => "en-US-JennyNeural",
+        },
+        "silero-tts" => "baya",
         _ => "en-US-JennyNeural",
     }
 }
@@ -80,57 +325,97 @@ fn hash_key(input: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-fn audio_dir(app: &AppHandle, article_id: &str) -> Result<PathBuf, String> {
-    let dir = app
+fn audio_dir(
+    app: &AppHandle,
+    article_id: &str,
+    tts_api: &str,
+    is_word: bool,
+) -> Result<PathBuf, String> {
+    let base_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir error: {}", e))?
-        .join("audio")
-        .join(article_id);
+        .join("audio");
+
+    let dir = if is_word {
+        base_dir.join("global").join(tts_api)
+    } else {
+        base_dir.join(article_id)
+    };
+
     fs::create_dir_all(&dir).map_err(|e| format!("create audio dir error: {}", e))?;
     Ok(dir)
 }
 
-fn edge_tts_mp3(text: &str, voice_name: &str) -> Result<Vec<u8>, String> {
-    let clean_text: String = text.nfd()
-        .filter(|c| {
-            let cp = *c as u32;
-            !(0x0300..=0x036F).contains(&cp)
-        })
-        .collect();  // remove diacritics to improve TTS consistency, especially for Russian stress marks
+async fn edge_tts_mp3(text: &str, voice_name: &str) -> Result<Vec<u8>, String> {
+    let text = text.to_string();
+    let voice_name = voice_name.to_string();
+    task::spawn_blocking(move || {
+        // remove diacritics and emoji to improve TTS consistency, especially for Russian stress marks
+        let clean_text: String = text
+            .nfd()
+            .filter(|c| {
+                let cp = *c as u32;
+                if (0x0300..=0x036F).contains(&cp) {
+                    return false;
+                }
+                if is_emoji(*c) {
+                    return false;
+                }
+                true
+            })
+            .collect();
 
-    let mut client = connect().map_err(|e| format!("edge tts connect error: {}", e))?;
+        let mut client = connect().map_err(|e| format!("edge tts connect error: {}", e))?;
 
-    let voice_json = format!(r#"{{"Name":"{}"}}"#, voice_name);
-    let voice: EdgeVoice =
-        serde_json::from_str(&voice_json).map_err(|e| format!("voice parse error: {}", e))?;
+        let voice_json = format!(r#"{{"Name":"{}"}}"#, voice_name);
+        let voice: EdgeVoice =
+            serde_json::from_str(&voice_json).map_err(|e| format!("voice parse error: {}", e))?;
 
-    let config = SpeechConfig::from(&voice);
+        let config = SpeechConfig::from(&voice);
 
-    let audio = client
-        .synthesize(&clean_text, &config) 
-        .map_err(|e| format!("edge tts synthesize error: {}", e))?;
+        let audio = client
+            .synthesize(&clean_text, &config)
+            .map_err(|e| format!("edge tts synthesize error: {}", e))?;
 
-    Ok(audio.audio_bytes)
+        dbg!(text, voice_name, audio.audio_bytes.len());
+        Ok(audio.audio_bytes)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking join error: {}", e))?
 }
 
-fn ensure_audio_cached_sync(
+async fn ensure_audio_cached_async(
     app: &AppHandle,
     article_id: &str,
     lang: &str,
     text: &str,
-    kind: &str,
+    kind: &str, // "sentence" or "block"
+    tts_api: &str,
+    qwen_api_key: &str,
+    qwen_voice: &str,
+    silero_tts_url: &str
 ) -> Result<String, String> {
-    let voice = pick_voice(lang);
-    let key = hash_key(&format!("{}|{}|{}", voice, kind, text));
-    let dir = audio_dir(app, article_id)?;
+    let is_word = kind == "block";
+
+    let voice_name = pick_voice(lang, tts_api).to_string();
+
+    let key = hash_key(&format!("{}|{}|{}", tts_api, voice_name, text));
+
+    let dir = audio_dir(app, article_id, tts_api, is_word)?;
     let path = dir.join(format!("{}_{}.mp3", kind, key));
 
     if path.exists() {
         return Ok(path.to_string_lossy().to_string());
     }
 
-    let audio = edge_tts_mp3(text, voice)?;
+    let api_key_to_use = if tts_api == "qwen3-tts" {
+        qwen_api_key
+    } else {
+        ""
+    };
+
+    let audio = generate_tts_audio(text, &voice_name, tts_api, api_key_to_use, qwen_voice, silero_tts_url).await?;
 
     let tmp = dir.join(format!(".tmp_{}_{}.mp3", kind, key));
     fs::write(&tmp, audio).map_err(|e| format!("write audio error: {}", e))?;
@@ -147,23 +432,19 @@ async fn ensure_audio_cached(
     kind: &'static str,
     tts_sem: Arc<Semaphore>,
     tts_locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
+    tts_api: Arc<String>,
+    qwen_api_key: Arc<String>,
+    qwen_voice: Arc<String>,
+    silero_tts_url: Arc<String>,
 ) -> Result<String, String> {
-    let voice = pick_voice(&lang);
-    let key = hash_key(&format!("{}|{}|{}", voice, kind, text));
+    let lock_key = format!("{}|{}|{}", tts_api, kind, text);
 
     let lock = tts_locks
-        .entry(key.clone())
+        .entry(lock_key.clone())
         .or_insert_with(|| Arc::new(Mutex::new(())))
         .clone();
 
     let _guard = lock.lock().await;
-
-    let dir = audio_dir(&app, &article_id)?;
-    let path = dir.join(format!("{}_{}.mp3", kind, key));
-
-    if path.exists() {
-        return Ok(path.to_string_lossy().to_string());
-    }
 
     let _permit = tts_sem
         .acquire_owned()
@@ -174,14 +455,24 @@ async fn ensure_audio_cached(
     let article_id2 = article_id.clone();
     let lang2 = lang.clone();
     let text2 = text.clone();
+    let tts_api2 = tts_api.clone();
+    let qwen_api_key2 = qwen_api_key.clone();
+    let qwen_voice2 = qwen_voice.clone();
+    let silero_tts_url2 = silero_tts_url.clone();
+    let out_path = ensure_audio_cached_async(
+        &app2,
+        &article_id2,
+        &lang2,
+        &text2,
+        kind,
+        &tts_api2,
+        &qwen_api_key2,
+        &qwen_voice2,
+        &silero_tts_url2
+    )
+    .await.map_err(|e| {dbg!(&e); e})?;
 
-    let out_path = task::spawn_blocking(move || {
-        ensure_audio_cached_sync(&app2, &article_id2, &lang2, &text2, kind)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking join error: {}", e))??;
-
-    tts_locks.remove(&key);
+    tts_locks.remove(&lock_key);
 
     Ok(out_path)
 }
@@ -371,7 +662,6 @@ Example Outputs:
 }
         "#;
 
-
         ("Russian", ru_rules, ru_example)
     };
 
@@ -428,7 +718,6 @@ Output:"#,
 // }
 
 // fn create_overlapping_chunks(text: &str, chunk_size: usize, overlap_size: usize) -> Vec<String> {
-//     // 1. 使用一个简单、快速的方式进行初步分割
 //     let preliminary_sentences: Vec<&str> = text
 //         .split_inclusive(|c: char| c.is_ascii_punctuation() || matches!(c, '。' | '\n'))
 //         .map(|s| s.trim())
@@ -442,12 +731,9 @@ Output:"#,
 //     let mut chunks = Vec::new();
 //     let mut current_chunk = String::new();
 //     let mut current_len = 0;
-
-//     // 2. 将初步句子组合成大小合适的文本块 (Chunks)
 //     for sentence in preliminary_sentences {
 //         if current_len > 0 && current_len + sentence.len() > chunk_size {
 //             chunks.push(current_chunk.clone());
-//             // 创建重叠部分
 //             let overlap_start_byte = current_chunk
 //                 .char_indices()
 //                 .rev()
@@ -459,11 +745,9 @@ Output:"#,
 //             current_chunk = current_chunk[overlap_start_byte..].to_string();
 //         }
 //         current_chunk.push_str(sentence);
-//         current_chunk.push(' '); // 确保句子间有空格
+//         current_chunk.push(' ');
 //         current_len = current_chunk.len();
 //     }
-
-//     // 3. 添加最后一个 chunk
 //     if !current_chunk.trim().is_empty() {
 //         chunks.push(current_chunk);
 //     }
@@ -474,7 +758,6 @@ Output:"#,
 // fn build_sentence_split_prompt(text_chunk: &str) -> String {
 //     format!(
 //         r#"You are an expert sentence boundary detector. Your task is to take a block of text and split it into a precise list of sentences.
-
 // STRICT RULES:
 // 1. Your output MUST be a single, valid JSON object.
 // 2. The JSON object must contain a single key, "sentences", which is an array of strings.
@@ -582,6 +865,10 @@ async fn parse_text(
     concurrency: usize,
     pre_cache_audio: bool,
     tts_concurrency: usize,
+    tts_api: String,
+    qwen_api_key: String,
+    qwen_voice: String, // means voice instruction for qwen3-tts, ignored for edge tts
+    silero_tts_url: String, // only used for silero tts
     old_sentences: Option<Vec<Sentence>>, //as cache in edit mode
 ) -> Result<Vec<Sentence>, String> {
     if api_key.is_empty() {
@@ -634,6 +921,10 @@ async fn parse_text(
     let completed = Arc::new(AtomicUsize::new(0));
     let tts_sem = Arc::new(Semaphore::new(tts_concurrency.max(1)));
     let tts_locks: Arc<DashMap<String, Arc<Mutex<()>>>> = Arc::new(DashMap::new());
+    let tts_api = Arc::new(tts_api);
+    let qwen_api_key = Arc::new(qwen_api_key);
+    let qwen_voice = Arc::new(qwen_voice);
+    let silero_tts_url = Arc::new(silero_tts_url);
 
     let tasks = raw_sentences.into_iter().enumerate().map(|(i, raw)| {
         let api_key = api_key.clone();
@@ -647,6 +938,11 @@ async fn parse_text(
 
         let tts_locks = tts_locks.clone();
         let tts_sem = tts_sem.clone();
+
+        let tts_api = tts_api.clone();
+        let qwen_api_key = qwen_api_key.clone();
+        let qwen_voice = qwen_voice.clone();
+        let silero_tts_url = silero_tts_url.clone();
 
         async move {
             let cached = old_map.get(&raw).cloned();
@@ -690,11 +986,27 @@ async fn parse_text(
                     let sem2 = tts_sem.clone();
                     let raw2 = raw.clone();
                     let locks2 = tts_locks.clone();
+                    let tts_api = tts_api.clone();
+                    let qwen_api_key = qwen_api_key.clone();
+                    let qwen_voice = qwen_voice.clone();
+                    let silero_tts_url = silero_tts_url.clone();
 
                     tokio::spawn(async move {
-                        ensure_audio_cached(app2, id2, lang2, raw2, "sentence", sem2, locks2)
-                            .await
-                            .ok()
+                        ensure_audio_cached(
+                            app2,
+                            id2,
+                            lang2,
+                            raw2,
+                            "sentence",
+                            sem2,
+                            locks2,
+                            tts_api,
+                            qwen_api_key,
+                            qwen_voice,
+                            silero_tts_url
+                        )
+                        .await
+                        .ok()
                     })
                 };
 
@@ -711,6 +1023,7 @@ async fn parse_text(
                 let lang3 = language.clone();
                 let sem3 = tts_sem.clone();
                 let locks3 = tts_locks.clone();
+                let silero_tts_url = silero_tts_url.clone();
 
                 let block_paths: Vec<(usize, Option<String>)> = stream::iter(block_inputs)
                     .map(move |(idx, text, pos)| {
@@ -719,16 +1032,31 @@ async fn parse_text(
                         let lang3 = lang3.clone();
                         let sem3 = sem3.clone();
                         let locks3 = locks3.clone();
+                        let tts_api = tts_api.clone();
+                        let qwen_api_key = qwen_api_key.clone();
+                        let qwen_voice = qwen_voice.clone();
+                        let silero_tts_url = silero_tts_url.clone();
 
                         async move {
                             if pos == "punctuation" || text.trim().is_empty() {
                                 return (idx, None);
                             }
 
-                            let p =
-                                ensure_audio_cached(app3, id3, lang3, text, "block", sem3, locks3)
-                                    .await
-                                    .ok();
+                            let p = ensure_audio_cached(
+                                app3,
+                                id3,
+                                lang3,
+                                text,
+                                "block",
+                                sem3,
+                                locks3,
+                                tts_api,
+                                qwen_api_key,
+                                qwen_voice,
+                                silero_tts_url
+                            )
+                            .await
+                            .ok();
 
                             (idx, p)
                         }

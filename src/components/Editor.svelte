@@ -69,6 +69,10 @@
                 concurrency: $settings.concurrency,
                 ttsConcurrency: $settings.ttsConcurrency,
                 preCacheAudio: $settings.preCacheAudio,
+                ttsApi: $settings.ttsApi,
+                qwenApiKey: $settings.qwenApiKey,
+                qwenVoice: $settings.qwenVoice,
+                sileroTtsUrl: $settings.sileroUrl,
                 oldSentences: currentArticle.sentences || null,
             });
 
