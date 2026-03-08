@@ -159,8 +159,7 @@ async fn generate_tts_audio(
 ) -> Result<Vec<u8>, String> {
     match api_type {
         "qwen3-tts" => qwen_tts_mp3(text, voice, api_key, qwen_voice).await,
-        "silero-tts" => silero_tts_mp3(silero_server_url,
-            text, voice, 48000, true, true).await,
+        "silero-tts" => silero_tts_mp3(silero_server_url, text, voice, 48000, true, true).await,
         _ => edge_tts_mp3(text, voice).await,
     }
 }
@@ -194,7 +193,8 @@ async fn silero_tts_mp3(
         .error_for_status()
         .map_err(|e| format!("Silero TTS request error: {}", e))?;
 
-    let audio_bytes = resp.bytes()
+    let audio_bytes = resp
+        .bytes()
         .await
         .map_err(|e| format!("Silero TTS parse error: {}", e))?
         .to_vec();
@@ -208,7 +208,8 @@ pub async fn qwen_tts_mp3(
     qwen_voice: &str,
 ) -> Result<Vec<u8>, String> {
     let client = Client::new();
-    let url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation" ;
+    let url =
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
     let model = if qwen_voice.is_empty() {
         "qwen3-tts-flash".to_string()
     } else {
@@ -243,17 +244,17 @@ pub async fn qwen_tts_mp3(
         .await
         .map_err(|e| format!("Failed to send request to DashScope API: {}", e))?;
 
-    let response_text = resp.text().await
+    let response_text = resp
+        .text()
+        .await
         .map_err(|e| format!("Failed to read response body: {}", e))?;
 
-    let tts_resp: TtsResponse = serde_json::from_str(&response_text)
-        .map_err(|e| {
-            format!(
-                "Failed to parse JSON. Error: {}. Body: {}",
-                e, response_text
-            )
-        })?;
-
+    let tts_resp: TtsResponse = serde_json::from_str(&response_text).map_err(|e| {
+        format!(
+            "Failed to parse JSON. Error: {}. Body: {}",
+            e, response_text
+        )
+    })?;
 
     if let Some(code) = &tts_resp.code {
         if !code.is_empty() {
@@ -300,13 +301,12 @@ pub async fn qwen_tts_mp3(
     Ok(audio_bytes.to_vec())
 }
 
-
 // --- edge TTS ---
 fn pick_voice(lang: &str, tts_api: &str) -> &'static str {
     match tts_api {
         "qwen3-tts" => match lang {
-            "KR" => "Cherry",
-            "RU" => "Neil",
+            "KR" => "Sohee",
+            "RU" => "Alek",
             _ => "en-US-JennyNeural",
         },
         "edge-tts" => match lang {
@@ -351,21 +351,6 @@ async fn edge_tts_mp3(text: &str, voice_name: &str) -> Result<Vec<u8>, String> {
     let text = text.to_string();
     let voice_name = voice_name.to_string();
     task::spawn_blocking(move || {
-        // remove diacritics and emoji to improve TTS consistency, especially for Russian stress marks
-        let clean_text: String = text
-            .nfd()
-            .filter(|c| {
-                let cp = *c as u32;
-                if (0x0300..=0x036F).contains(&cp) {
-                    return false;
-                }
-                if is_emoji(*c) {
-                    return false;
-                }
-                true
-            })
-            .collect();
-
         let mut client = connect().map_err(|e| format!("edge tts connect error: {}", e))?;
 
         let voice_json = format!(r#"{{"Name":"{}"}}"#, voice_name);
@@ -375,7 +360,7 @@ async fn edge_tts_mp3(text: &str, voice_name: &str) -> Result<Vec<u8>, String> {
         let config = SpeechConfig::from(&voice);
 
         let audio = client
-            .synthesize(&clean_text, &config)
+            .synthesize(&text, &config)
             .map_err(|e| format!("edge tts synthesize error: {}", e))?;
 
         dbg!(text, voice_name, audio.audio_bytes.len());
@@ -394,9 +379,35 @@ async fn ensure_audio_cached_async(
     tts_api: &str,
     qwen_api_key: &str,
     qwen_voice: &str,
-    silero_tts_url: &str
+    silero_tts_url: &str,
 ) -> Result<String, String> {
+    // remove diacritics and emoji to improve TTS consistency, especially for Russian stress marks
+    let mut text: String = text
+        .nfd()
+        .filter(|c| {
+            let cp = *c as u32;
+            if (0x0300..=0x036F).contains(&cp) {
+                return false;
+            }
+            if is_emoji(*c) {
+                return false;
+            }
+            true
+        })
+        .collect();
     let is_word = kind == "block";
+    
+    text = match text.chars().last() {
+        Some(last_char) => {
+            if matches!(last_char, '。' | '！' | '？' | '.' | '!' | '?') {
+                text.to_string()
+            } else {
+                format!("{}.", text)
+            }
+        }
+        None => "".to_string(),
+    };
+    let text: &str = &text;
 
     let voice_name = pick_voice(lang, tts_api).to_string();
 
@@ -407,6 +418,7 @@ async fn ensure_audio_cached_async(
 
     if path.exists() {
         return Ok(path.to_string_lossy().to_string());
+        // fs::remove_file(&path).map_err(|e| format!("remove old audio error: {}", e))?;
     }
 
     let api_key_to_use = if tts_api == "qwen3-tts" {
@@ -415,7 +427,15 @@ async fn ensure_audio_cached_async(
         ""
     };
 
-    let audio = generate_tts_audio(text, &voice_name, tts_api, api_key_to_use, qwen_voice, silero_tts_url).await?;
+    let audio = generate_tts_audio(
+        text,
+        &voice_name,
+        tts_api,
+        api_key_to_use,
+        qwen_voice,
+        silero_tts_url,
+    )
+    .await?;
 
     let tmp = dir.join(format!(".tmp_{}_{}.mp3", kind, key));
     fs::write(&tmp, audio).map_err(|e| format!("write audio error: {}", e))?;
@@ -468,9 +488,13 @@ async fn ensure_audio_cached(
         &tts_api2,
         &qwen_api_key2,
         &qwen_voice2,
-        &silero_tts_url2
+        &silero_tts_url2,
     )
-    .await.map_err(|e| {dbg!(&e); e})?;
+    .await
+    .map_err(|e| {
+        dbg!(&e);
+        e
+    })?;
 
     tts_locks.remove(&lock_key);
 
@@ -1003,7 +1027,7 @@ async fn parse_text(
                             tts_api,
                             qwen_api_key,
                             qwen_voice,
-                            silero_tts_url
+                            silero_tts_url,
                         )
                         .await
                         .ok()
@@ -1053,7 +1077,7 @@ async fn parse_text(
                                 tts_api,
                                 qwen_api_key,
                                 qwen_voice,
-                                silero_tts_url
+                                silero_tts_url,
                             )
                             .await
                             .ok();

@@ -10,6 +10,7 @@
     import Flag from "./Flag.svelte";
     import type { Sentence, Block } from "../lib/types";
     import { convertFileSrc } from "@tauri-apps/api/core";
+    import { onMount, onDestroy } from 'svelte';
 
     $: article = $articles.find((a) => a.id === $activeArticleId) as any;
 
@@ -22,6 +23,33 @@
 
     let popoverPosition = { top: 0, left: 0, align: "bottom", arrowLeft: 0 };
     let isGrammarExpanded = false;
+
+    function handleKeydown(event: KeyboardEvent) {
+        if ((event.target as HTMLElement).tagName === 'INPUT' || (event.target as HTMLElement).tagName === 'TEXTAREA') {
+            return;
+        }
+        
+        switch(event.key) {
+            case '1':
+                event.preventDefault();
+                viewMode = 'word';
+                activeSentence = null;
+                break;
+            case '2':
+                event.preventDefault();
+                viewMode = 'sentence';
+                activeBlock = null;
+                break;
+        }
+    }
+    
+    onMount(() => {
+        window.addEventListener('keydown', handleKeydown);
+    });
+    
+    onDestroy(() => {
+        window.removeEventListener('keydown', handleKeydown);
+    });
 
     const colorMap: Record<string, string> = {
         noun: "bg-blue-50 text-blue-700 active:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:active:bg-blue-900/55",
@@ -239,7 +267,7 @@
     </div>
 
     <div
-        class="flex-1 overflow-y-auto p-6 md:p-10 leading-loose text-lg md:text-xl font-medium text-zinc-800 dark:text-zinc-200 pb-32"
+        class="flex-1 overflow-y-auto p-6 md:p-10 leading-loose text-lg md:text-xl font-medium text-zinc-800 dark:text-zinc-200 pb-[35vh]"
     >
         {#if article && article.sentences}
             {#each article.sentences as sentence}
