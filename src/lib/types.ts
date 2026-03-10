@@ -51,4 +51,6 @@ export interface Settings {
     qwenApiKey: string;
     qwenVoice: string;
     sileroUrl: string;
+    ruaccentEnabled: boolean;
+    ruaccentUrl: string;
 }

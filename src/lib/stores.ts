@@ -39,7 +39,9 @@ export const settings = writable<Settings>({
     ttsApi: "edge-tts",
     qwenApiKey: '',
     qwenVoice: '',
-    sileroUrl: ''
+    sileroUrl: '',
+    ruaccentEnabled: false,
+    ruaccentUrl: '',
 })
 
 export const parsingQueue = writable<string[]>([]); // article id

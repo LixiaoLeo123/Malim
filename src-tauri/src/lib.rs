@@ -109,16 +109,10 @@ struct TtsResponse {
 
     #[serde(default)]
     output: Option<TtsOutput>,
-
-    #[serde(default)]
-    usage: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
 struct TtsOutput {
-    #[serde(default)]
-    finish_reason: Option<String>,
-
     #[serde(default)]
     audio: Option<TtsAudio>,
 }
@@ -127,15 +121,6 @@ struct TtsOutput {
 struct TtsAudio {
     #[serde(default)]
     url: Option<String>,
-
-    #[serde(default)]
-    data: Option<String>,
-
-    #[serde(default)]
-    id: Option<String>,
-
-    #[serde(default)]
-    expires_at: Option<i64>,
 }
 
 // --- for Silero TTS ---
@@ -147,6 +132,44 @@ pub struct SileroTtsRequest {
     pub sample_rate: u32,
     pub put_accent: bool,
     pub put_yo: bool,
+}
+
+// --- for Russian accent server ---
+#[derive(Serialize)]
+struct AccentRequest<'a> {
+    text: &'a str,
+}
+
+#[derive(Deserialize)]
+struct AccentResponse {
+    accented_text: String,
+}
+
+async fn fetch_accented_text(text: &str, server_url: &str) -> Result<String, String> {
+    let client = Client::new();
+    let req_body = AccentRequest { text };
+    let url = format!("{}/accentize", server_url.trim_end_matches('/'));
+    let res = client
+        .post(&url)
+        .json(&req_body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request to Python server: {}", e))?;
+
+    if res.status().is_success() {
+        let response_data: AccentResponse = res
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response from Python server: {}", e))?;
+        dbg!("Accented text received:");
+        dbg!(&text);
+        dbg!(&response_data.accented_text);
+        Ok(response_data.accented_text)
+    } else {
+        let err_msg = format!("Python server returned an error: {}", res.status());
+        dbg!(&err_msg);
+        Err(err_msg)
+    }
 }
 
 async fn generate_tts_audio(
@@ -348,7 +371,17 @@ fn audio_dir(
 }
 
 async fn edge_tts_mp3(text: &str, voice_name: &str) -> Result<Vec<u8>, String> {
-    let text = text.to_string();
+    // remove stress marks
+    let text: String = text
+        .nfd()
+        .filter(|c| {
+            let cp = *c as u32;
+            if (0x0300..=0x036F).contains(&cp) {
+                return false;
+            }
+            true
+        })
+        .collect();
     let voice_name = voice_name.to_string();
     task::spawn_blocking(move || {
         let mut client = connect().map_err(|e| format!("edge tts connect error: {}", e))?;
@@ -381,14 +414,13 @@ async fn ensure_audio_cached_async(
     qwen_voice: &str,
     silero_tts_url: &str,
 ) -> Result<String, String> {
-    // remove diacritics and emoji to improve TTS consistency, especially for Russian stress marks
+    // remove diacritics and emoji to improve TTS consistency, keep stress marks
     let mut text: String = text
         .nfd()
         .filter(|c| {
-            let cp = *c as u32;
-            if (0x0300..=0x036F).contains(&cp) {
-                return false;
-            }
+            // if (0x0300..=0x036F).contains(&cp) {
+            //     return false;
+            // }
             if is_emoji(*c) {
                 return false;
             }
@@ -396,7 +428,7 @@ async fn ensure_audio_cached_async(
         })
         .collect();
     let is_word = kind == "block";
-    
+    // add . at the end of sentence to make TTS more stable
     text = match text.chars().last() {
         Some(last_char) => {
             if matches!(last_char, '。' | '！' | '？' | '.' | '!' | '?') {
@@ -446,16 +478,16 @@ async fn ensure_audio_cached_async(
 
 async fn ensure_audio_cached(
     app: AppHandle,
-    article_id: Arc<String>,
-    lang: Arc<String>,
+    article_id: String,
+    lang: String,
     text: String,
     kind: &'static str,
     tts_sem: Arc<Semaphore>,
     tts_locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
-    tts_api: Arc<String>,
-    qwen_api_key: Arc<String>,
-    qwen_voice: Arc<String>,
-    silero_tts_url: Arc<String>,
+    tts_api: String,
+    qwen_api_key: String,
+    qwen_voice: String,
+    silero_tts_url: String,
 ) -> Result<String, String> {
     let lock_key = format!("{}|{}|{}", tts_api, kind, text);
 
@@ -471,24 +503,16 @@ async fn ensure_audio_cached(
         .await
         .map_err(|_| "tts semaphore closed".to_string())?;
 
-    let app2 = app.clone();
-    let article_id2 = article_id.clone();
-    let lang2 = lang.clone();
-    let text2 = text.clone();
-    let tts_api2 = tts_api.clone();
-    let qwen_api_key2 = qwen_api_key.clone();
-    let qwen_voice2 = qwen_voice.clone();
-    let silero_tts_url2 = silero_tts_url.clone();
     let out_path = ensure_audio_cached_async(
-        &app2,
-        &article_id2,
-        &lang2,
-        &text2,
+        &app,
+        &article_id,
+        &lang,
+        &text,
         kind,
-        &tts_api2,
-        &qwen_api_key2,
-        &qwen_voice2,
-        &silero_tts_url2,
+        &tts_api,
+        &qwen_api_key,
+        &qwen_voice,
+        &silero_tts_url,
     )
     .await
     .map_err(|e| {
@@ -502,7 +526,7 @@ async fn ensure_audio_cached(
 }
 
 // --- AI ---
-fn build_prompt(lang: &str, sentence: &str) -> String {
+fn build_prompt(lang: &str, sentence: &str, stress_mark: bool) -> String {
     const BASE_RULES: &str = r#"
 You are a precise JSON generator.
 STRICT RULES:
@@ -536,7 +560,7 @@ Example Output:
     ]
 }}
 "#;
-        ("Korean", kr_rules, kr_example)
+        ("Korean", kr_rules.to_owned(), kr_example)
     } else {
         let ru_rules = r#"
 You are a Russian linguistic analyzer for beginner learners.
@@ -575,13 +599,7 @@ FIELD RULES:
 2. Include grammatical fields only if meaningful.
    Do not include unused fields.
 
-3. **Stress Marks**:
-   You MUST add stress marks (acute accents) to Russian words in the `text` and `lemma` fields.
-   - Mark the stressed vowel with an acute accent (e.g., "кни́га", "чита́ть").
-   - Do NOT add stress to monosyllabic words (e.g., "я", "в", "на") unless necessary for disambiguation.
-   - Do NOT add stress to numbers or English words.
-
-4. **POS must be one of the following**:
+3. **POS must be one of the following**:
    - noun
    - verb
    - adjective
@@ -593,9 +611,19 @@ FIELD RULES:
    - punctuation
    - unknown
 
-5. Participles → adjective.
-6. Gerunds → verb (tense = "gerund").
-
+4. Participles → adjective.
+5. Gerunds → verb (tense = "gerund").
+"#.to_owned() + if stress_mark {
+            r#"
+6. **Stress Marks**:
+   You MUST add stress marks (acute accents) to Russian words in the `text` and `lemma` fields.
+   - Mark the stressed vowel with an acute accent (e.g., "кни́га", "чита́ть").
+   - Do NOT add stress to monosyllabic words (e.g., "я", "в", "на") unless necessary for disambiguation.
+   - Do NOT add stress to numbers or English words.
+"#
+        } else {
+            ""
+        } + r#"
 CATEGORY-SPECIFIC LOGIC:
 
 **NOUNS**:
@@ -690,7 +718,8 @@ Example Outputs:
     };
 
     format!(
-        r#"{base_rules}
+        r#"
+{base_rules}
 {task_rules}
 {example}
 Sentence: "{sentence}"
@@ -875,6 +904,26 @@ async fn call_ai_api(
     Ok(ai_parsed_result)
 }
 
+// for parse_text task
+#[derive(Debug, Clone)]
+struct TaskContext {
+    api_key: String,
+    api_url: String,
+    model_name: String,
+    language: String,
+    id: String,
+    old_map: Arc<HashMap<String, Sentence>>,
+    completed: Arc<AtomicUsize>,
+    app: AppHandle,
+    tts_locks: Arc<DashMap<String, Arc<Mutex<()>>>>,
+    tts_sem: Arc<Semaphore>,
+    tts_api: String,
+    qwen_api_key: String,
+    qwen_voice: String,
+    silero_tts_url: String,
+    ruaccent_url: String,
+}
+
 //major func
 #[tauri::command]
 async fn parse_text(
@@ -893,13 +942,15 @@ async fn parse_text(
     qwen_api_key: String,
     qwen_voice: String, // means voice instruction for qwen3-tts, ignored for edge tts
     silero_tts_url: String, // only used for silero tts
+    ruaccent_enabled: bool, // only used for Russian, whether to get stress marks from accent_url(ruaccent) or just llm
+    ruaccent_url: String,
     old_sentences: Option<Vec<Sentence>>, //as cache in edit mode
 ) -> Result<Vec<Sentence>, String> {
     if api_key.is_empty() {
         return Err("API Key is missing".to_string());
     }
 
-    let mut old_map: HashMap<String, Sentence> = HashMap::new();
+    let mut old_map = HashMap::new();
     if let Some(old) = old_sentences {
         for sent in old {
             old_map.insert(sent.original.clone(), sent);
@@ -937,52 +988,61 @@ async fn parse_text(
 
     let total = raw_sentences.len();
 
-    let api_key = Arc::new(api_key);
-    let api_url = Arc::new(api_url);
-    let model_name = Arc::new(model_name);
-    let language = Arc::new(language);
-    let id = Arc::new(id);
     let completed = Arc::new(AtomicUsize::new(0));
     let tts_sem = Arc::new(Semaphore::new(tts_concurrency.max(1)));
     let tts_locks: Arc<DashMap<String, Arc<Mutex<()>>>> = Arc::new(DashMap::new());
-    let tts_api = Arc::new(tts_api);
-    let qwen_api_key = Arc::new(qwen_api_key);
-    let qwen_voice = Arc::new(qwen_voice);
-    let silero_tts_url = Arc::new(silero_tts_url);
 
+    let ctx = TaskContext {
+        api_key,
+        api_url,
+        model_name,
+        language,
+        id,
+        old_map,
+        completed,
+        app,
+        tts_locks,
+        tts_sem,
+        tts_api,
+        qwen_api_key,
+        qwen_voice,
+        silero_tts_url,
+        ruaccent_url,
+    };
     let tasks = raw_sentences.into_iter().enumerate().map(|(i, raw)| {
-        let api_key = api_key.clone();
-        let api_url = api_url.clone();
-        let model_name = model_name.clone();
-        let language = language.clone();
-        let id = id.clone();
-        let old_map = old_map.clone();
-        let completed = completed.clone();
-        let app = app.clone();
-
-        let tts_locks = tts_locks.clone();
-        let tts_sem = tts_sem.clone();
-
-        let tts_api = tts_api.clone();
-        let qwen_api_key = qwen_api_key.clone();
-        let qwen_voice = qwen_voice.clone();
-        let silero_tts_url = silero_tts_url.clone();
-
+        let ctx = ctx.clone();
         async move {
-            let cached = old_map.get(&raw).cloned();
-            let (mut blocks, translation) = if cached
-                .as_ref()
-                .map_or(false, |b| !b.translation.starts_with('$'))
-            {
+            let cached = ctx.old_map.get(&raw).cloned();
+            let (mut blocks, translation) = if cached.as_ref().map_or(false, |b| {
+                b.blocks.last().map_or(false, |last| last.pos != "error")
+            }) {
                 let b = cached.unwrap();
                 (b.blocks, b.translation)
             } else {
-                let prompt = build_prompt(&language, &raw);
-                match call_ai_api(&api_key, &api_url, &model_name, prompt).await {
+                // clear possible stress marks
+                let clean_raw = raw.replace('\u{0301}', "");
+
+                let prompt = build_prompt(&ctx.language, &raw, !ruaccent_enabled);
+                let ai_future = call_ai_api(&ctx.api_key, &ctx.api_url, &ctx.model_name, prompt);
+
+                let is_ru =
+                    ctx.language.to_lowercase() == "ru" || ctx.language.to_lowercase() == "russian";
+                let accent_future = async {
+                    if is_ru && ruaccent_enabled {
+                        fetch_accented_text(&clean_raw, &ctx.ruaccent_url).await.ok()
+                    } else {
+                        None
+                    }
+                };
+
+                let (ai_result, accent_opt) = tokio::join!(ai_future, accent_future);
+
+                let (mut new_blocks, new_trans) = match ai_result {
                     Ok(res) => (res.blocks, res.translation),
                     Err(err) => (
                         vec![WordBlock {
                             text: raw.clone(),
+                            // a marker
                             pos: "error".to_string(),
                             definition: format!("Error: {}", err),
                             chinese_root: None,
@@ -995,39 +1055,81 @@ async fn parse_text(
                             tense: None,
                             aspect: None,
                         }],
-                        "$Translation unavailable due to error.".to_string(),
+                        "Translation unavailable due to error.".to_string(),
                     ),
-                }
-            };
+                };
+                // Silero auto stress are more accurate for regular words, while ruaccent is better at handling irregular words
+                // so we use ruaccent for words and keep silero for sentences to maximize accuracy
+                // save the sentence for TTS
+                // let accented_sentence = accent_opt.clone();
+                if let Some(accented_sentence) = accent_opt {
+                    let mut accented_iter = accented_sentence.chars().peekable();
 
+                    let chars_match = |a: char, b: char| -> bool {
+                        if a == b {
+                            return true;
+                        }
+                        let a_low = a.to_lowercase().next();
+                        let b_low = b.to_lowercase().next();
+                        a_low == b_low
+                            || (a_low == Some('ё') && b_low == Some('е'))
+                            || (a_low == Some('е') && b_low == Some('ё'))
+                    };
+
+                    for block in &mut new_blocks {
+                        let clean_block = block.text.replace('\u{0301}', "");
+                        let mut new_text = String::new();
+
+                        for bc in clean_block.chars() {
+                            let mut matched = false;
+                            while let Some(&ac) = accented_iter.peek() {
+                                if ac == '\u{0301}' {
+                                    new_text.push(accented_iter.next().unwrap());
+                                } else if chars_match(ac, bc) {
+                                    new_text.push(accented_iter.next().unwrap());
+                                    matched = true;
+                                    break;
+                                } else {
+                                    accented_iter.next();
+                                }
+                            }
+                            if !matched {
+                                new_text.push(bc);
+                            }
+                        }
+
+                        while let Some(&next_c) = accented_iter.peek() {
+                            if next_c == '\u{0301}' {
+                                new_text.push(accented_iter.next().unwrap());
+                            } else {
+                                break;
+                            }
+                        }
+
+                        block.text = new_text;
+                    }
+                }
+                (new_blocks, new_trans)
+            };
             // --- audio ---
             let mut sentence_audio = None;
             if pre_cache_audio {
                 let sentence_handle = {
-                    let app2 = app.clone();
-                    let id2 = id.clone();
-                    let lang2 = language.clone();
-                    let sem2 = tts_sem.clone();
-                    let raw2 = raw.clone();
-                    let locks2 = tts_locks.clone();
-                    let tts_api = tts_api.clone();
-                    let qwen_api_key = qwen_api_key.clone();
-                    let qwen_voice = qwen_voice.clone();
-                    let silero_tts_url = silero_tts_url.clone();
-
+                    let ctx = ctx.clone();
+                    let raw = raw.clone();
                     tokio::spawn(async move {
                         ensure_audio_cached(
-                            app2,
-                            id2,
-                            lang2,
-                            raw2,
+                            ctx.app,
+                            ctx.id,
+                            ctx.language,
+                            raw,
                             "sentence",
-                            sem2,
-                            locks2,
-                            tts_api,
-                            qwen_api_key,
-                            qwen_voice,
-                            silero_tts_url,
+                            ctx.tts_sem,
+                            ctx.tts_locks,
+                            ctx.tts_api,
+                            ctx.qwen_api_key,
+                            ctx.qwen_voice,
+                            ctx.silero_tts_url,
                         )
                         .await
                         .ok()
@@ -1042,42 +1144,28 @@ async fn parse_text(
                     .map(|(idx, b)| (idx, b.text.clone(), b.pos.clone()))
                     .collect();
 
-                let app3 = app.clone();
-                let id3 = id.clone();
-                let lang3 = language.clone();
-                let sem3 = tts_sem.clone();
-                let locks3 = tts_locks.clone();
-                let silero_tts_url = silero_tts_url.clone();
-
+                let ctx = ctx.clone();
                 let block_paths: Vec<(usize, Option<String>)> = stream::iter(block_inputs)
                     .map(move |(idx, text, pos)| {
-                        let app3 = app3.clone();
-                        let id3 = id3.clone();
-                        let lang3 = lang3.clone();
-                        let sem3 = sem3.clone();
-                        let locks3 = locks3.clone();
-                        let tts_api = tts_api.clone();
-                        let qwen_api_key = qwen_api_key.clone();
-                        let qwen_voice = qwen_voice.clone();
-                        let silero_tts_url = silero_tts_url.clone();
-
+                        let ctx = ctx.clone();
                         async move {
                             if pos == "punctuation" || text.trim().is_empty() {
                                 return (idx, None);
                             }
 
+                            // the text here contains stress marks for Russian
                             let p = ensure_audio_cached(
-                                app3,
-                                id3,
-                                lang3,
+                                ctx.app,
+                                ctx.id,
+                                ctx.language,
                                 text,
                                 "block",
-                                sem3,
-                                locks3,
-                                tts_api,
-                                qwen_api_key,
-                                qwen_voice,
-                                silero_tts_url,
+                                ctx.tts_sem,
+                                ctx.tts_locks,
+                                ctx.tts_api,
+                                ctx.qwen_api_key,
+                                ctx.qwen_voice,
+                                ctx.silero_tts_url,
                             )
                             .await
                             .ok();
@@ -1095,20 +1183,19 @@ async fn parse_text(
 
                 sentence_audio = sentence_handle.await.ok().flatten();
             }
-
             let sentence = Sentence {
-                id: format!("{}_{}", id, i),
+                id: format!("{}_{}", ctx.id, i),
                 original: raw.clone(),
                 blocks,
                 translation,
                 audio_path: sentence_audio,
             };
 
-            let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-            let _ = app.emit(
+            let current = ctx.completed.fetch_add(1, Ordering::SeqCst) + 1;
+            let _ = ctx.app.emit(
                 "parsing-progress",
                 ProgressPayload {
-                    id: id.to_string(),
+                    id: ctx.id.to_string(),
                     current,
                     total,
                     percent: ((current as f32 / total as f32) * 100.0) as u32,

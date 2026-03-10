@@ -23,6 +23,9 @@
     let tempQwenApiKey = "";
     let tempQwenVoice = "";
 
+    let tempRuaccentEnabled = false;
+    let tempRuaccentUrl = "http://127.0.0.1:8002";
+
     $: if (open) {
         tempKey = $settings.apiKey;
         tempUrl = $settings.apiUrl;
@@ -35,6 +38,8 @@
         tempSileroUrl = $settings.sileroUrl ?? "http://127.0.0.1:8001";
         tempQwenApiKey = $settings.qwenApiKey;
         tempQwenVoice = $settings.qwenVoice;
+        tempRuaccentEnabled = $settings.ruaccentEnabled ?? false;
+        tempRuaccentUrl = $settings.ruaccentUrl ?? "http://127.0.0.1:8002";
     }
 
     function handleSave() {
@@ -50,6 +55,8 @@
             sileroUrl: tempSileroUrl.trim(),
             qwenApiKey: tempQwenApiKey.trim(),
             qwenVoice: tempQwenVoice.trim(),
+            ruaccentEnabled: tempRuaccentEnabled,
+            ruaccentUrl: tempRuaccentUrl.trim(),
         });
         open = false;
     }
@@ -152,6 +159,46 @@
                     </style>
                 </label>
             </div>
+            <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
+            <div class="flex items-center justify-between mt-3 mb-2">
+                <span class="text-sm text-zinc-600 dark:text-zinc-300"
+                    >Enable Precise RU Accentuation</span
+                >
+                <button
+                    type="button"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempRuaccentEnabled
+                        ? 'bg-zinc-900 dark:bg-zinc-100'
+                        : 'bg-zinc-300 dark:bg-zinc-700'}"
+                    aria-label="Enable RUAccent"
+                    aria-pressed={tempRuaccentEnabled}
+                    on:click={() =>
+                        (tempRuaccentEnabled = !tempRuaccentEnabled)}
+                >
+                    <span
+                        class="inline-block h-5 w-5 transform rounded-full bg-white dark:bg-zinc-900 transition-transform {tempRuaccentEnabled
+                            ? 'translate-x-5'
+                            : 'translate-x-1'}"
+                    ></span>
+                </button>
+            </div>
+
+            {#if tempRuaccentEnabled}
+                <div class="mb-4">
+                    <label class="block">
+                        <span
+                            class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                        >
+                            RUAccent Server URL
+                        </span>
+                        <input
+                            type="text"
+                            bind:value={tempRuaccentUrl}
+                            class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
+                            placeholder="http://127.0.0.1:8002/accentize"
+                        />
+                    </label>
+                </div>
+            {/if}
             <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
             <!-- Auto Speak -->
             <div class="flex items-center justify-between mt-3">
@@ -335,24 +382,23 @@
                         </span>
                     </label>
                 {/if}
-
-                <div class="flex justify-end pt-2 gap-2">
-                    <button
-                        type="button"
-                        class="px-4 py-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-                        on:click={() => (open = false)}
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        type="button"
-                        class="px-4 py-1.5 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg active:scale-95 transition duration-100 ease-out dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                        on:click={handleSave}
-                    >
-                        Save
-                    </button>
-                </div>
             {/if}
+            <div class="flex justify-end pt-2 gap-2">
+                <button
+                    type="button"
+                    class="px-4 py-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                    on:click={() => (open = false)}
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    class="px-4 py-1.5 text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 rounded-lg active:scale-95 transition duration-100 ease-out dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                    on:click={handleSave}
+                >
+                    Save
+                </button>
+            </div>
         </div>
     </div>
 {/if}

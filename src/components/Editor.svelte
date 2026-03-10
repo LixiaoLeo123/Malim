@@ -73,6 +73,8 @@
                 qwenApiKey: $settings.qwenApiKey,
                 qwenVoice: $settings.qwenVoice,
                 sileroTtsUrl: $settings.sileroUrl,
+                ruaccentEnabled: $settings.ruaccentEnabled,
+                ruaccentUrl: $settings.ruaccentUrl,
                 oldSentences: currentArticle.sentences || null,
             });
 
