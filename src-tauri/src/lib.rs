@@ -757,19 +757,17 @@ async fn ensure_audio_cached(
 
 // --- AI ---
 fn build_prompt(lang: &str, sentence: &str, stress_mark: bool) -> String {
-    let estimated_capacity = BASE_RULES.len() 
-        + sentence.len() 
-        + 256;
-    
+    let estimated_capacity = BASE_RULES.len() + sentence.len() + 256;
+
     let mut prompt = String::with_capacity(estimated_capacity);
     write!(prompt, "{}", BASE_RULES).unwrap();
-    
+
     match lang {
         "KR" => {
             write!(prompt, "{}", KR_RULES).unwrap();
             write!(prompt, "{}", KR_EXAMPLE).unwrap();
             write!(prompt, "\nSentence to analyze: {}\n", sentence).unwrap();
-        },
+        }
         "RU" => {
             write!(prompt, "{}", RU_RULES_BASE).unwrap();
             if stress_mark {
@@ -777,17 +775,17 @@ fn build_prompt(lang: &str, sentence: &str, stress_mark: bool) -> String {
             }
             write!(prompt, "{}", RU_RULES_REST).unwrap();
             if stress_mark {
-            write!(prompt, "{}", RU_EXAMPLE_STRESS).unwrap();
+                write!(prompt, "{}", RU_EXAMPLE_STRESS).unwrap();
             } else {
                 write!(prompt, "{}", RU_EXAMPLE_NO_STRESS).unwrap();
             }
             write!(prompt, "\nSentence to analyze: {}\n", sentence).unwrap();
-        },
+        }
         _ => {
             write!(prompt, "Analyze the sentence below and provide a JSON output with translation, tokenization, POS tagging, and definitions for each token.\nSentence: {}\n", sentence).unwrap();
         }
     }
-    
+
     prompt
 }
 
@@ -1072,6 +1070,30 @@ async fn parse_text(
     let tasks = raw_sentences.into_iter().enumerate().map(|(i, raw)| {
         let ctx = ctx.clone();
         async move {
+            // cache sentence audio in parallel with AI processing
+            let sentence_handle = if pre_cache_audio {
+                let ctx = ctx.clone();
+                let raw = raw.clone();
+                Some(tokio::spawn(async move {
+                    ensure_audio_cached(
+                        ctx.app,
+                        ctx.id,
+                        ctx.language,
+                        raw,
+                        "sentence",
+                        ctx.tts_sem,
+                        ctx.tts_locks,
+                        ctx.tts_api,
+                        ctx.qwen_api_key,
+                        ctx.qwen_voice,
+                        ctx.silero_tts_url,
+                    )
+                    .await
+                    .ok()
+                }))
+            } else {
+                None
+            };
             let cached = ctx.old_map.get(&raw).cloned();
             let mut lemma_accent_task = None;
             let (mut blocks, translation) = if cached.as_ref().map_or(false, |b| {
@@ -1208,28 +1230,6 @@ async fn parse_text(
             // --- audio ---
             let mut sentence_audio = None;
             if pre_cache_audio {
-                let sentence_handle = {
-                    let ctx = ctx.clone();
-                    let raw = raw.clone();
-                    tokio::spawn(async move {
-                        ensure_audio_cached(
-                            ctx.app,
-                            ctx.id,
-                            ctx.language,
-                            raw,
-                            "sentence",
-                            ctx.tts_sem,
-                            ctx.tts_locks,
-                            ctx.tts_api,
-                            ctx.qwen_api_key,
-                            ctx.qwen_voice,
-                            ctx.silero_tts_url,
-                        )
-                        .await
-                        .ok()
-                    })
-                };
-
                 let inner = tts_concurrency.min(8).max(1);
 
                 let block_inputs: Vec<(usize, String, String)> = blocks
@@ -1275,7 +1275,12 @@ async fn parse_text(
                     blocks[idx].audio_path = p;
                 }
 
-                sentence_audio = sentence_handle.await.ok().flatten();
+                sentence_audio = match sentence_handle {
+                    None => None,
+                    Some(handle) => {
+                        handle.await.ok().flatten()
+                    }
+                };
             }
             // collect result from lemma accent task
             if let Some(task) = lemma_accent_task {
