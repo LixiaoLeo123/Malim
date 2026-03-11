@@ -40,6 +40,20 @@ model = torch.package.PackageImporter(MODEL_FILE).load_pickle("tts_models", "mod
 model.to(DEVICE)
 print("Silero model loaded.")
 
+def convert_acute_to_plus(text: str) -> str:
+    # vowels = set("аеёиоуыэюяАЕЁИОУЫЭЮЯ")
+    result = []
+    i = 0
+    while i < len(text):
+        if (i + 1 < len(text) and     # text[i] in vowels
+            text[i + 1] == '\u0301'):
+            result.append('+' + text[i])
+            i += 2
+        else:
+            result.append(text[i])
+            i += 1
+    
+    return ''.join(result)
 
 def sanitize_russian_text(text: str) -> str:
     translit_map = {
@@ -138,7 +152,7 @@ def tts(req: TTSRequest):
         raise HTTPException(status_code=400, detail="text must not be empty")
 
     try:
-        clean_text = sanitize_russian_text(req.text)
+        clean_text = convert_acute_to_plus(sanitize_russian_text(req.text))
         
         if not clean_text:
             raise HTTPException(status_code=400, detail="Text contains no processable Russian characters after cleaning.")

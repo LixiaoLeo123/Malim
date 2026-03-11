@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -18,6 +19,235 @@ use tokio::{
 use unic_emoji_char::is_emoji;
 use unicode_normalization::UnicodeNormalization;
 
+// ---prompts---
+const BASE_RULES: &str = r#"
+You are a precise JSON generator.
+STRICT RULES:
+1. Your output MUST be a single, valid JSON object.
+2. Do NOT use Markdown code blocks (```json ... ```) in your final output.
+3. Use ONLY standard ASCII punctuation.
+4. Do NOT include any text outside the JSON object.
+"#;
+const KR_RULES: &str = r#"
+Task: Analyze the Korean sentence below.
+1.  TRANSLATION: Provide a natural English translation of the entire sentence.
+2.  TOKENIZATION: Split into morphemes.
+    - CRITICAL: Do NOT decompose Hangul characters (Jamo).
+    - CRITICAL: Do NOT discard punctuation. Output punctuation as separate blocks with pos 'punctuation'.
+3.  POS Tagging (Strictly use these tags only):
+    - noun, pronoun, verb, adjective, adverb, particle, ending, punctuation, unknown.
+4.  DEFINITION: Provide a concise English definition for each block.
+5.  CHINESE ROOT: For Sino-Korean words, providing 'chinese_root' is MANDATORY.
+"#;
+const KR_EXAMPLE: &str = r#"
+Example Output:
+{{
+    "translation": "I go to school.",
+    "blocks": [
+        {{ "text": "학교", "pos": "noun", "definition": "school", "chinese_root": "学校", "grammar_note": null }},
+        {{ "text": "에", "pos": "particle", "definition": "to (indicates direction)", "chinese_root": null, "grammar_note": "Location marker" }},
+        {{ "text": "갑니다", "pos": "verb", "definition": "go", "chinese_root": null, "grammar_note": "Formal, present tense" }},
+        {{ "text": ".", "pos": "punctuation", "definition": ".", "chinese_root": null, "grammar_note": null }}
+    ]
+}}
+"#;
+const RU_RULES_BASE: &str = r#"
+You are a Russian linguistic analyzer for beginner learners.
+Your goal is to make Russian fully understandable.
+
+Return a single JSON object:
+
+{
+  "translation": "...",
+  "blocks": [
+    {
+      "text": "...",
+      "pos": "...",
+      "definition": "...",
+      "lemma": "...",
+      "gram_case": 1-7,
+      "gram_gender": "m" | "f" | "n",
+      "gram_number": "sg" | "pl",
+      "tense": "pres" | "past" | "fut" | "imp" | "inf" | "gerund",
+      "aspect": "pf" | "impf",
+      "grammar_note": "..."
+    }
+  ]
+}
+
+CORE PRINCIPLE:
+**Context determines grammar.**
+You must analyze SYNTAX (verb government, prepositions, quantifiers) to determine Case.
+Do NOT rely solely on word endings.
+
+FIELD RULES:
+
+1. Always include:
+   text, pos, definition.
+
+2. Include grammatical fields only if meaningful.
+   Do not include unused fields.
+
+3. **POS must be one of the following**:
+   - noun
+   - verb
+   - adjective
+   - adverb
+   - pronoun
+   - preposition (e.g., в, на, к, о)
+   - conjunction (e.g., и, а, но)
+   - particle
+   - punctuation
+   - unknown
+
+4. Participles → adjective.
+5. Gerunds → verb (tense = "gerund").
+"#;
+const RU_RULES_STRESS: &str = r#"
+6. **Stress Marks**:
+   You MUST add stress marks (acute accents) to Russian words in the `text` and `lemma` fields.
+   - Mark the stressed vowel with an acute accent (e.g., "кни́га", "чита́ть").
+   - Do NOT add stress to monosyllabic words (e.g., "я", "в", "на") unless necessary for disambiguation.
+   - Do NOT add stress to numbers or English words.
+"#;
+const RU_RULES_REST: &str = r#"
+CATEGORY-SPECIFIC LOGIC:
+
+**NOUNS**:
+Include lemma, gram_case, gram_gender, gram_number.
+**Case Logic (CRITICAL)**:
+- Check the PREPOSITION. E.g., "в/на" + location = Case 6; "в/на" + motion = Case 4.
+- Check the VERB. E.g., transitive verbs usually take Case 4 for direct objects.
+- Check for NEGATION (e.g., "нет"). "нет" + noun = Case 2.
+- Check for QUANTIFIERS. Words like "много" (many/much), "немного" (a little), "мало" (few), "сколько" (how much/many) **ALWAYS** govern Case 2 (Genitive).
+  - Example: "немного та́йны" -> "та́йны" is Case 2 (Genitive Singular), NOT Nominative.
+
+**ADJECTIVES**:
+Include lemma.
+**CRITICAL RESTRICTION**: Do NOT include `gram_case`, `gram_gender`, or `gram_number` for adjectives.
+- Simply identify the word as an adjective and provide its base form (lemma).
+- Ensure the POS is correct. If it modifies a noun, it is an adjective.
+
+**VERBS**:
+Include lemma.
+Include tense if identifiable.
+Include aspect (pf or impf).
+**Lemma Logic**:
+- The `lemma` MUST always be the **Infinitive** (the uninflected base form).
+- For **Perfective verbs**, provide the Perfective Infinitive (e.g., for "напишу́", lemma is "написа́ть").
+- For **Imperfective verbs**, provide the Imperfective Infinitive (e.g., for "чита́ю", lemma is "чита́ть").
+
+**PRONOUNS (Personal)**:
+Include lemma, gram_case, gram_gender, gram_number.
+- For 1st/2nd person ("я", "ты"), gender defaults to "m" unless context proves otherwise.
+
+GRAMMAR_NOTE:
+
+Explain briefly in simple English:
+- what role the word plays in the sentence
+- why its form looks like this
+- mention the ending change if relevant
+
+Do NOT repeat the lemma.
+Do NOT use rigid labels like "Base form:", "Why:", "How:".
+Write naturally and concisely.
+"#;
+const RU_EXAMPLE_STRESS: &str = r#"
+Example Outputs:
+
+{
+  "translation": "There is a little mystery on the table.",
+  "blocks": [
+    {
+      "text": "На",
+      "pos": "preposition",
+      "definition": "on",
+      "lemma": "на",
+      "grammar_note": "Governs the Prepositional case when indicating location."
+    },
+    {
+      "text": "столе́",
+      "pos": "noun",
+      "definition": "table",
+      "lemma": "сто́л",
+      "gram_case": 6,
+      "gram_gender": "m",
+      "gram_number": "sg",
+      "grammar_note": "Prepositional case indicating location. Note the stress shifts to the ending."
+    },
+    {
+      "text": "немно́го",
+      "pos": "adverb",
+      "definition": "a little",
+      "lemma": "немно́го",
+      "grammar_note": "Quantifier acting as an adverb, modifying the quantity of the noun."
+    },
+    {
+      "text": "та́йны",
+      "pos": "noun",
+      "definition": "mystery",
+      "lemma": "та́йна",
+      "gram_case": 2,
+      "gram_gender": "f",
+      "gram_number": "sg",
+      "grammar_note": "Genitive case governed by the quantifier 'немного'. The ending '-ы' is genitive singular."
+    },
+    {
+      "text": ".",
+      "pos": "punctuation",
+      "definition": "."
+    }
+  ]
+}
+"#;
+const RU_EXAMPLE_NO_STRESS: &str = r#"
+Example Outputs:
+
+{
+  "translation": "There is a little mystery on the table.",
+  "blocks": [
+    {
+      "text": "На",
+      "pos": "preposition",
+      "definition": "on",
+      "lemma": "на",
+      "grammar_note": "Governs the Prepositional case when indicating location."
+    },
+    {
+      "text": "столе",
+      "pos": "noun",
+      "definition": "table",
+      "lemma": "стол",
+      "gram_case": 6,
+      "gram_gender": "m",
+      "gram_number": "sg",
+      "grammar_note": "Prepositional case indicating location. Note the stress shifts to the ending."
+    },
+    {
+      "text": "немного",
+      "pos": "adverb",
+      "definition": "a little",
+      "lemma": "немного",
+      "grammar_note": "Quantifier acting as an adverb, modifying the quantity of the noun."
+    },
+    {
+      "text": "тайны",
+      "pos": "noun",
+      "definition": "mystery",
+      "lemma": "тайна",
+      "gram_case": 2,
+      "gram_gender": "f",
+      "gram_number": "sg",
+      "grammar_note": "Genitive case governed by the quantifier 'немного'. The ending '-ы' is genitive singular."
+    },
+    {
+      "text": ".",
+      "pos": "punctuation",
+      "definition": "."
+    }
+  ]
+}
+"#;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WordBlock {
     text: String,
@@ -527,208 +757,38 @@ async fn ensure_audio_cached(
 
 // --- AI ---
 fn build_prompt(lang: &str, sentence: &str, stress_mark: bool) -> String {
-    const BASE_RULES: &str = r#"
-You are a precise JSON generator.
-STRICT RULES:
-1. Your output MUST be a single, valid JSON object.
-2. Do NOT use Markdown code blocks (```json ... ```) in your final output.
-3. Use ONLY standard ASCII punctuation.
-4. Do NOT include any text outside the JSON object.
-"#;
-
-    let (_lang_target, task_rules, example) = if lang == "KR" {
-        let kr_rules = r#"
-Task: Analyze the Korean sentence below.
-1.  TRANSLATION: Provide a natural English translation of the entire sentence.
-2.  TOKENIZATION: Split into morphemes.
-    - CRITICAL: Do NOT decompose Hangul characters (Jamo).
-    - CRITICAL: Do NOT discard punctuation. Output punctuation as separate blocks with pos 'punctuation'.
-3.  POS Tagging (Strictly use these tags only):
-    - noun, pronoun, verb, adjective, adverb, particle, ending, punctuation, unknown.
-4.  DEFINITION: Provide a concise English definition for each block.
-5.  CHINESE ROOT: For Sino-Korean words, providing 'chinese_root' is MANDATORY.
-"#;
-        let kr_example = r#"
-Example Output:
-{{
-    "translation": "I go to school.",
-    "blocks": [
-        {{ "text": "학교", "pos": "noun", "definition": "school", "chinese_root": "学校", "grammar_note": null }},
-        {{ "text": "에", "pos": "particle", "definition": "to (indicates direction)", "chinese_root": null, "grammar_note": "Location marker" }},
-        {{ "text": "갑니다", "pos": "verb", "definition": "go", "chinese_root": null, "grammar_note": "Formal, present tense" }},
-        {{ "text": ".", "pos": "punctuation", "definition": ".", "chinese_root": null, "grammar_note": null }}
-    ]
-}}
-"#;
-        ("Korean", kr_rules.to_owned(), kr_example)
-    } else {
-        let ru_rules = r#"
-You are a Russian linguistic analyzer for beginner learners.
-Your goal is to make Russian fully understandable.
-
-Return a single JSON object:
-
-{
-  "translation": "...",
-  "blocks": [
-    {
-      "text": "...",
-      "pos": "...",
-      "definition": "...",
-      "lemma": "...",
-      "gram_case": 1-7,
-      "gram_gender": "m" | "f" | "n",
-      "gram_number": "sg" | "pl",
-      "tense": "pres" | "past" | "fut" | "imp" | "inf" | "gerund",
-      "aspect": "pf" | "impf",
-      "grammar_note": "..."
+    let estimated_capacity = BASE_RULES.len() 
+        + sentence.len() 
+        + 256;
+    
+    let mut prompt = String::with_capacity(estimated_capacity);
+    write!(prompt, "{}", BASE_RULES).unwrap();
+    
+    match lang {
+        "KR" => {
+            write!(prompt, "{}", KR_RULES).unwrap();
+            write!(prompt, "{}", KR_EXAMPLE).unwrap();
+            write!(prompt, "\nSentence to analyze: {}\n", sentence).unwrap();
+        },
+        "RU" => {
+            write!(prompt, "{}", RU_RULES_BASE).unwrap();
+            if stress_mark {
+                write!(prompt, "{}", RU_RULES_STRESS).unwrap();
+            }
+            write!(prompt, "{}", RU_RULES_REST).unwrap();
+            if stress_mark {
+            write!(prompt, "{}", RU_EXAMPLE_STRESS).unwrap();
+            } else {
+                write!(prompt, "{}", RU_EXAMPLE_NO_STRESS).unwrap();
+            }
+            write!(prompt, "\nSentence to analyze: {}\n", sentence).unwrap();
+        },
+        _ => {
+            write!(prompt, "Analyze the sentence below and provide a JSON output with translation, tokenization, POS tagging, and definitions for each token.\nSentence: {}\n", sentence).unwrap();
+        }
     }
-  ]
-}
-
-CORE PRINCIPLE:
-**Context determines grammar.**
-You must analyze SYNTAX (verb government, prepositions, quantifiers) to determine Case.
-Do NOT rely solely on word endings.
-
-FIELD RULES:
-
-1. Always include:
-   text, pos, definition.
-
-2. Include grammatical fields only if meaningful.
-   Do not include unused fields.
-
-3. **POS must be one of the following**:
-   - noun
-   - verb
-   - adjective
-   - adverb
-   - pronoun
-   - preposition (e.g., в, на, к, о)
-   - conjunction (e.g., и, а, но)
-   - particle
-   - punctuation
-   - unknown
-
-4. Participles → adjective.
-5. Gerunds → verb (tense = "gerund").
-"#.to_owned() + if stress_mark {
-            r#"
-6. **Stress Marks**:
-   You MUST add stress marks (acute accents) to Russian words in the `text` and `lemma` fields.
-   - Mark the stressed vowel with an acute accent (e.g., "кни́га", "чита́ть").
-   - Do NOT add stress to monosyllabic words (e.g., "я", "в", "на") unless necessary for disambiguation.
-   - Do NOT add stress to numbers or English words.
-"#
-        } else {
-            ""
-        } + r#"
-CATEGORY-SPECIFIC LOGIC:
-
-**NOUNS**:
-Include lemma, gram_case, gram_gender, gram_number.
-**Case Logic (CRITICAL)**:
-- Check the PREPOSITION. E.g., "в/на" + location = Case 6; "в/на" + motion = Case 4.
-- Check the VERB. E.g., transitive verbs usually take Case 4 for direct objects.
-- Check for NEGATION (e.g., "нет"). "нет" + noun = Case 2.
-- Check for QUANTIFIERS. Words like "много" (many/much), "немного" (a little), "мало" (few), "сколько" (how much/many) **ALWAYS** govern Case 2 (Genitive).
-  - Example: "немного та́йны" -> "та́йны" is Case 2 (Genitive Singular), NOT Nominative.
-
-**ADJECTIVES**:
-Include lemma.
-**CRITICAL RESTRICTION**: Do NOT include `gram_case`, `gram_gender`, or `gram_number` for adjectives.
-- Simply identify the word as an adjective and provide its base form (lemma).
-- Ensure the POS is correct. If it modifies a noun, it is an adjective.
-
-**VERBS**:
-Include lemma.
-Include tense if identifiable.
-Include aspect (pf or impf).
-**Lemma Logic**:
-- The `lemma` MUST always be the **Infinitive** (the uninflected base form).
-- For **Perfective verbs**, provide the Perfective Infinitive (e.g., for "напишу́", lemma is "написа́ть").
-- For **Imperfective verbs**, provide the Imperfective Infinitive (e.g., for "чита́ю", lemma is "чита́ть").
-
-**PRONOUNS (Personal)**:
-Include lemma, gram_case, gram_gender, gram_number.
-- For 1st/2nd person ("я", "ты"), gender defaults to "m" unless context proves otherwise.
-
-GRAMMAR_NOTE:
-
-Explain briefly in simple English:
-- what role the word plays in the sentence
-- why its form looks like this
-- mention the ending change if relevant
-
-Do NOT repeat the lemma.
-Do NOT use rigid labels like "Base form:", "Why:", "How:".
-Write naturally and concisely.
-        "#;
-        let ru_example = r#"
-Example Outputs:
-
-{
-  "translation": "There is a little mystery on the table.",
-  "blocks": [
-    {
-      "text": "На",
-      "pos": "preposition",
-      "definition": "on",
-      "lemma": "на",
-      "grammar_note": "Governs the Prepositional case when indicating location."
-    },
-    {
-      "text": "столе́",
-      "pos": "noun",
-      "definition": "table",
-      "lemma": "сто́л",
-      "gram_case": 6,
-      "gram_gender": "m",
-      "gram_number": "sg",
-      "grammar_note": "Prepositional case indicating location. Note the stress shifts to the ending."
-    },
-    {
-      "text": "немно́го",
-      "pos": "adverb",
-      "definition": "a little",
-      "lemma": "немно́го",
-      "grammar_note": "Quantifier acting as an adverb, modifying the quantity of the noun."
-    },
-    {
-      "text": "та́йны",
-      "pos": "noun",
-      "definition": "mystery",
-      "lemma": "та́йна",
-      "gram_case": 2,
-      "gram_gender": "f",
-      "gram_number": "sg",
-      "grammar_note": "Genitive case governed by the quantifier 'немного'. The ending '-ы' is genitive singular."
-    },
-    {
-      "text": ".",
-      "pos": "punctuation",
-      "definition": "."
-    }
-  ]
-}
-        "#;
-
-        ("Russian", ru_rules, ru_example)
-    };
-
-    format!(
-        r#"
-{base_rules}
-{task_rules}
-{example}
-Sentence: "{sentence}"
-Output:"#,
-        base_rules = BASE_RULES,
-        task_rules = task_rules,
-        example = example,
-        sentence = sentence
-    )
+    
+    prompt
 }
 
 // fn create_overlapping_chunks(text: &str, chunk_size: usize, overlap_size: usize) -> Vec<String> {
@@ -1013,6 +1073,7 @@ async fn parse_text(
         let ctx = ctx.clone();
         async move {
             let cached = ctx.old_map.get(&raw).cloned();
+            let mut lemma_accent_task = None;
             let (mut blocks, translation) = if cached.as_ref().map_or(false, |b| {
                 b.blocks.last().map_or(false, |last| last.pos != "error")
             }) {
@@ -1029,7 +1090,9 @@ async fn parse_text(
                     ctx.language.to_lowercase() == "ru" || ctx.language.to_lowercase() == "russian";
                 let accent_future = async {
                     if is_ru && ruaccent_enabled {
-                        fetch_accented_text(&clean_raw, &ctx.ruaccent_url).await.ok()
+                        fetch_accented_text(&clean_raw, &ctx.ruaccent_url)
+                            .await
+                            .ok()
                     } else {
                         None
                     }
@@ -1109,6 +1172,37 @@ async fn parse_text(
                         block.text = new_text;
                     }
                 }
+                // add stress marks to lemma
+                if ruaccent_enabled && is_ru {
+                    let lemmas_to_accentize: Vec<(usize, String)> = new_blocks
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, b)| b.lemma.clone().map(|l| (i, l)))
+                        .collect();
+
+                    let ruaccent_url_for_lemma = ctx.ruaccent_url.clone();
+
+                    lemma_accent_task = Some(tokio::spawn(async move {
+                        if !lemmas_to_accentize.is_empty() {
+                            stream::iter(lemmas_to_accentize)
+                                .map(|(idx, lemma)| {
+                                    let url = ruaccent_url_for_lemma.clone();
+                                    async move {
+                                        let clean_lemma = lemma.replace('\u{0301}', "");
+                                        let accented = fetch_accented_text(&clean_lemma, &url)
+                                            .await
+                                            .unwrap_or(lemma);
+                                        (idx, accented)
+                                    }
+                                })
+                                .buffer_unordered(8)
+                                .collect::<Vec<_>>()
+                                .await
+                        } else {
+                            Vec::new()
+                        }
+                    }));
+                }
                 (new_blocks, new_trans)
             };
             // --- audio ---
@@ -1183,6 +1277,15 @@ async fn parse_text(
 
                 sentence_audio = sentence_handle.await.ok().flatten();
             }
+            // collect result from lemma accent task
+            if let Some(task) = lemma_accent_task {
+                if let Ok(accented_lemmas) = task.await {
+                    for (idx, accented_lemma) in accented_lemmas {
+                        blocks[idx].lemma = Some(accented_lemma);
+                    }
+                }
+            }
+
             let sentence = Sentence {
                 id: format!("{}_{}", ctx.id, i),
                 original: raw.clone(),
