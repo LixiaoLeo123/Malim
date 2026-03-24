@@ -356,12 +356,12 @@ struct TtsAudio {
 // --- for Silero TTS ---
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct SileroTtsRequest {
-    pub text: String,
-    pub speaker: String,
-    pub sample_rate: u32,
-    pub put_accent: bool,
-    pub put_yo: bool,
+struct SileroTtsRequest {
+    text: String,
+    speaker: String,
+    sample_rate: u32,
+    put_accent: bool,
+    put_yo: bool,
 }
 
 // --- for Russian accent server ---
@@ -1385,6 +1385,7 @@ pub fn run() {
         .manage(AppState {
             // sentence_cache: Mutex::new(HashMap::new()),
         })
+        .plugin(tauri_plugin_media_toolkit::init())
         .invoke_handler(tauri::generate_handler![
             parse_text,
             save_data,

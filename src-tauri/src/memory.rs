@@ -1,0 +1,522 @@
+use rand::seq::SliceRandom;
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
+
+const DEFAULT_S0: f64 = 0.05;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WordStat {
+    pub lemma: String,
+    pub s0: f64,
+    pub k: u32,       // total times
+    pub last_ts: i64, // timestamp
+    pub current_s: f64,
+}
+
+#[derive(Debug, Clone)]
+struct Interaction {
+    ts: i64,
+    clicked: bool, // true = forget
+}
+
+#[derive(Debug, Serialize)]
+struct GlobalStats {
+    total_expected_vocabulary: f64,
+    total_words: u32,
+}
+
+fn get_db_path(app: &AppHandle) -> PathBuf {
+    app.path().app_data_dir().unwrap().join("memory.db")
+}
+
+pub fn init_db(app: &AppHandle) -> Result<Connection, String> {
+    let path = get_db_path(app);
+    let conn = Connection::open(&path).map_err(|e| format!("DB Error: {}", e))?;
+
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA temp_store = MEMORY;",
+    )
+    .ok();
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS interactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lemma TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            clicked INTEGER NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS word_stats (
+            lemma TEXT PRIMARY KEY,
+            s0 REAL NOT NULL,
+            k INTEGER NOT NULL,
+            last_ts INTEGER NOT NULL,
+            current_s REAL NOT NULL,
+            dirty INTEGER DEFAULT 0
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS config (
+            key TEXT PRIMARY KEY,
+            value REAL NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS daily_reading (
+            date TEXT PRIMARY KEY,
+            count INTEGER NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lemma ON interactions(lemma)",
+        [],
+    )
+    .ok();
+
+    Ok(conn)
+}
+
+// return: (total likelihood, suprises)
+fn calc_likelihood_and_surprise(
+    s0: f64,
+    alpha: f64,
+    intervals: &[(f64, bool)], // (dt_days, clicked)
+    weights: &[f64],
+) -> (f64, Vec<f64>) {
+    let mut total_ll = 0.0;
+    let mut surprises = Vec::with_capacity(intervals.len());
+
+    for (i, (dt, clicked)) in intervals.iter().enumerate() {
+        let w = weights[i];
+
+        let s = s0 * (i + 2).powf(alpha);
+        let p = (-dt / s).exp().clamp(1e-9, 1.0 - 1e-9);
+
+        let point_ll = if *clicked { (1.0 - p).ln() } else { p.ln() };
+
+        total_ll += w * point_ll;
+
+        surprises.push(-point_ll);
+    }
+    (total_ll, surprises)
+}
+
+fn fit_s0_weighted(intervals: &[(f64, bool)], alpha: f64, weights: &[f64]) -> f64 {
+    let (mut a, mut b) = (0.5, 365.0);
+    let phi = (5.0_f64.sqrt() - 1.0) / 2.0;
+
+    let mut c = b - phi * (b - a);
+    let mut d = a + phi * (b - a);
+
+    let mut ll_c = calc_weighted_ll_only(c, alpha, intervals, weights);
+    let mut ll_d = calc_weighted_ll_only(d, alpha, intervals, weights);
+
+    for _ in 0..40 {
+        if ll_c > ll_d {
+            b = d;
+            d = c;
+            ll_d = ll_c;
+
+            c = b - phi * (b - a);
+            ll_c = calc_weighted_ll_only(c, alpha, intervals, weights);
+        } else {
+            a = c;
+            c = d;
+            ll_c = ll_d;
+
+            d = a + phi * (b - a);
+            ll_d = calc_weighted_ll_only(d, alpha, intervals, weights);
+        }
+    }
+    (a + b) / 2.0
+}
+
+fn calc_weighted_ll_only(s0: f64, alpha: f64, intervals: &[(f64, bool)], weights: &[f64]) -> f64 {
+    let mut ll = 0.0;
+    for (i, (dt, clicked)) in intervals.iter().enumerate() {
+        let w = weights[i];
+        let s = s0 * (i + 2).powf(alpha);
+        let p = (-dt / s).exp().clamp(1e-9, 1.0 - 1e-9);
+
+        if *clicked {
+            ll += w * (1.0 - p).ln();
+        } else {
+            ll += w * p.ln();
+        }
+    }
+    ll
+}
+
+pub fn recompute_all(conn: &mut Connection) -> Result<(), String> {
+    let current_alpha: f64 = conn
+        .query_row("SELECT value FROM config WHERE key='alpha'", [], |row| {
+            row.get(0)
+        })
+        .unwrap_or(0.3);
+
+    let mut raw_data: HashMap<String, Vec<Interaction>> = HashMap::new();
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT i.lemma, i.ts, i.clicked 
+         FROM interactions i
+         LEFT JOIN word_stats w ON i.lemma = w.lemma
+         WHERE w.dirty = 1 OR w.lemma IS NULL
+         ORDER BY i.ts ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i32>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    for r in rows {
+        let (lemma, ts, clicked) = r.map_err(|e| e.to_string())?;
+        raw_data.entry(lemma).or_default().push(Interaction {
+            ts,
+            clicked: clicked == 1,
+        });
+    }
+
+    if raw_data.is_empty() {
+        return Ok(());
+    }
+
+    let mut dataset: Vec<(String, Vec<(f64, bool)>, i64)> = Vec::new();
+    for (lemma, mut records) in raw_data {
+        if records.len() < 2 {
+            continue;
+        }
+        let last_ts = records.last().unwrap().ts;
+        let mut intervals = Vec::new();
+
+        for i in 1..records.len() {
+            let dt = (records[i].ts - records[i - 1].ts) as f64 / 86400.0;
+            if dt > 0.0 {
+                intervals.push((dt, records[i].clicked));
+            }
+        }
+
+        if !intervals.is_empty() {
+            dataset.push((lemma, intervals, last_ts));
+        }
+    }
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    for (lemma, intervals, last_ts) in &dataset {
+        let mut weights = vec![1.0; intervals.len()];
+
+        let has_forget = intervals.iter().any(|&(_, clicked)| clicked);
+        let has_remember = intervals.iter().any(|&(_, clicked)| !clicked);
+        let is_valid_for_mle = intervals.len() >= 5 && has_forget && has_remember;
+
+        let mut s0 = DEFAULT_S0;
+
+        if is_valid_for_mle {
+            for _ in 0..3 {
+                s0 = fit_s0_weighted(intervals, current_alpha, &weights);
+                let (_, surprises) =
+                    calc_likelihood_and_surprise(s0, current_alpha, intervals, &weights);
+                for (w, surp) in weights.iter_mut().zip(surprises.iter()) {
+                    if *surp > 3.0 {
+                        *w *= 0.3;
+                    }
+                }
+            }
+        }
+
+        let mut k = 1;
+        for (i, (_, clicked)) in intervals.iter().enumerate() {
+            if weights[i] > 0.5 {
+                k += 1;
+            }
+        }
+
+        let current_s = s0 * (k as f64).powf(current_alpha);
+
+        tx.execute(
+            "INSERT OR REPLACE INTO word_stats (lemma, s0, k, last_ts, current_s, dirty) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+            params![lemma, s0, k, last_ts, current_s]
+        ).map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn calibrate_global_model(conn: &mut Connection) -> Result<(), String> {
+    let mut raw_data: HashMap<String, Vec<Interaction>> = HashMap::new();
+    let mut stmt = conn
+        .prepare("SELECT lemma, ts, clicked FROM interactions ORDER BY ts ASC")
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i32>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    for r in rows {
+        let (lemma, ts, clicked) = r.map_err(|e| e.to_string())?;
+        raw_data.entry(lemma).or_default().push(Interaction {
+            ts,
+            clicked: clicked == 1,
+        });
+    }
+
+    if raw_data.is_empty() {
+        return Ok(());
+    }
+
+    let mut dataset: Vec<(String, Vec<(f64, bool)>, i64)> = Vec::with_capacity(raw_data.len());
+    for (lemma, records) in raw_data {
+        if records.len() < 2 {
+            continue;
+        }
+
+        let last_ts = records.last().unwrap().ts;
+        let mut intervals = Vec::with_capacity(records.len() - 1);
+
+        for i in 1..records.len() {
+            let dt = (records[i].ts - records[i - 1].ts) as f64 / 86400.0;
+            if dt > 0.0 {
+                intervals.push((dt, records[i].clicked));
+            }
+        }
+
+        if !intervals.is_empty() {
+            dataset.push((lemma, intervals, last_ts));
+        }
+    }
+
+    let valid_dataset: Vec<_> = dataset
+        .iter()
+        .filter(|(_, intervals, _)| {
+            let has_forget = intervals.iter().any(|&(_, c)| c);
+            let has_remember = intervals.iter().any(|&(_, c)| !c);
+            intervals.len() >= 5 && has_forget && has_remember
+        })
+        .collect();
+
+    let alpha_candidates: Vec<f64> = (10..=60).step_by(2).map(|x| x as f64 / 100.0).collect();
+    let mut best_alpha = 0.3;
+
+    if !valid_dataset.is_empty() {
+        let mut best_total_ll = f64::MIN;
+        for &test_alpha in &alpha_candidates {
+            let mut total_ll = 0.0;
+            
+            for (_, intervals, _) in &valid_dataset {
+                let mut weights = vec![1.0; intervals.len()];
+                let mut s0 = 0.05;
+
+                for _ in 0..3 {
+                    s0 = fit_s0_weighted(intervals, test_alpha, &weights);
+                    let (_, surprises) = calc_likelihood_and_surprise(s0, test_alpha, intervals, &weights);
+                    for (w, surp) in weights.iter_mut().zip(surprises.iter()) {
+                        if *surp > 3.0 { *w *= 0.3; }
+                    }
+                }
+                total_ll += calc_weighted_ll_only(s0, test_alpha, intervals, &weights);
+            }
+
+            if total_ll > best_total_ll {
+                best_total_ll = total_ll;
+                best_alpha = test_alpha;
+            }
+        }
+    }
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT OR REPLACE INTO config (key, value) VALUES ('alpha', ?1)",
+        params![best_alpha],
+    )?;
+
+    for (lemma, intervals, last_ts) in dataset {
+        let mut weights = vec![1.0; intervals.len()];
+
+        let has_forget = intervals.iter().any(|&(_, clicked)| clicked);
+        let has_remember = intervals.iter().any(|&(_, clicked)| !clicked);
+        let is_valid_for_mle = intervals.len() >= 5 && has_forget && has_remember;
+
+        let mut s0 = DEFAULT_S0;
+
+        if is_valid_for_mle {
+            for _ in 0..3 {
+                s0 = fit_s0_weighted(intervals, current_alpha, &weights);
+                let (_, surprises) =
+                    calc_likelihood_and_surprise(s0, current_alpha, intervals, &weights);
+                for (w, surp) in weights.iter_mut().zip(surprises.iter()) {
+                    if *surp > 3.0 {
+                        *w *= 0.3;
+                    }
+                }
+            }
+        }
+
+        let mut k = 1;
+        for (i, (_, clicked)) in intervals.iter().enumerate() {
+            if weights[i] > 0.5 {
+                k += 1;
+            }
+        }
+
+        let current_s = s0 * (k as f64).powf(current_alpha);
+
+        tx.execute(
+            "INSERT OR REPLACE INTO word_stats (lemma, s0, k, last_ts, current_s, dirty) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+            params![lemma, s0, k, last_ts, current_s]
+        ).map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn record_word_click(app: AppHandle, lemma: String, clicked: bool) -> Result<(), String> {
+    let mut conn = init_db(&app)?;
+    let now = chrono::Local::now().timestamp();
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO interactions (lemma, ts, clicked) VALUES (?1, ?2, ?3)",
+        params![&lemma, now, clicked],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // *0.5 is a temporary solution
+    tx.execute(
+        "UPDATE word_stats SET last_ts = ?1, current_s = current_s * 0.5, dirty = 1 WHERE lemma = ?2", 
+        params![now, &lemma]
+    ).map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn run_global_calibration(app: AppHandle) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut conn = init_db(&app)?;
+        let start = std::time::Instant::now();
+
+        calibrate_global_model(&mut conn)?;
+
+        let duration = start.elapsed();
+        Ok(format!("Global Calibration Complete. Took: {:?}", duration))
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+pub async fn get_vocabulary_expectation(app: AppHandle) -> Result<f64, String> {
+    let conn = init_db(&app)?;
+    let now = chrono::Local::now().timestamp();
+
+    recompute_all(conn);
+
+    let mut stmt = conn
+        .prepare("SELECT current_s, last_ts FROM word_stats")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, f64>(0)?, row.get::<_, i64>(1)?)))
+        .map_err(|e| e.to_string())?;
+
+    let mut total_p = 0.0;
+    for r in rows {
+        let (s, last_ts) = r.map_err(|e| e.to_string())?;
+        if s > 0.0 {
+            let dt = (now - last_ts) as f64 / 86400.0;
+            total_p += (-dt / s).exp();
+        }
+    }
+    Ok(total_p)
+}
+
+#[tauri::command]
+pub async fn update_daily_reading(app: AppHandle, count: u32) -> Result<(), String> {
+    let conn = init_db(&app)?;
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    conn.execute(
+        "INSERT INTO daily_reading (date, count) VALUES (?1, ?2) ON CONFLICT(date) DO UPDATE SET count = count + ?2",
+        params![today, count]
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_words_in_p_range(
+    app: AppHandle,
+    p_min: f64,
+    p_max: f64,
+    limit: usize,
+) -> Result<Vec<String>, String> {
+    let conn = init_db(&app)?;
+    let now = chrono::Local::now().timestamp();
+
+    let mut stmt = conn
+        .prepare("SELECT lemma, current_s, last_ts FROM word_stats WHERE current_s > 0.0")
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut matched_words = Vec::new();
+
+    for r in rows {
+        let (lemma, s, last_ts) = r.map_err(|e| e.to_string())?;
+        let dt = (now - last_ts) as f64 / 86400.0;
+        let p = (-dt / s).exp();
+
+        if p >= p_min && p <= p_max {
+            matched_words.push(lemma);
+        }
+    }
+
+    let mut rng = rand::thread_rng();
+    matched_words.shuffle(&mut rng);
+    matched_words.truncate(limit);
+
+    Ok(matched_words)
+}

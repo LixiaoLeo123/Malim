@@ -31,4 +31,8 @@ msedge-tts = "0.2"
 dashmap = "6"
 unicode-normalization = "0.1"
 unic-emoji-char = "0.9"
+tauri-plugin-media-toolkit = "0.1"
+rodio = "0.19"
+rusqlite = { version = "0.31", features = ["bundled"] }
+rand = "0.8"
 # openssl-sys = { version = "0.9", features = ["vendored"] }

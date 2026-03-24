@@ -11,6 +11,7 @@
     import type { Sentence, Block } from "../lib/types";
     import { convertFileSrc } from "@tauri-apps/api/core";
     import { onMount, onDestroy } from 'svelte';
+    import { playAudio, stopAudio } from "../lib/audio";
 
     $: article = $articles.find((a) => a.id === $activeArticleId) as any;
 
@@ -85,38 +86,38 @@
         return colorMap["noun"];
     }
 
-    function stopAudio() {
-        console.log("1");
-        if (player) {
-            player.pause();
-            player.currentTime = 0;
-            player = null;
-        }
-    }
+    // function stopAudio() {
+    //     console.log("1");
+    //     if (player) {
+    //         player.pause();
+    //         player.currentTime = 0;
+    //         player = null;
+    //     }
+    // }
 
-    function playAudio(localPath?: string | null) {
-        stopAudio();
-        if (!localPath) return;
+    // function playAudio(localPath?: string | null) {
+    //     stopAudio();
+    //     if (!localPath) return;
 
-        const normalized = localPath.replace(/\\/g, "/"); // Windows path normalize
-        const src = convertFileSrc(normalized);
+    //     const normalized = localPath.replace(/\\/g, "/"); // Windows path normalize
+    //     const src = convertFileSrc(normalized);
 
-        player = new Audio(src);
+    //     player = new Audio(src);
 
-        player.onended = () => {
-            player = null;
-        };
+    //     player.onended = () => {
+    //         player = null;
+    //     };
 
-        player.onerror = (e) => {
-            console.error("audio error:", e);
-            player = null;
-        };
+    //     player.onerror = (e) => {
+    //         console.error("audio error:", e);
+    //         player = null;
+    //     };
 
-        player.play().catch((e) => {
-            console.error("audio play failed:", e, { localPath, src });
-            player = null;
-        });
-    }
+    //     player.play().catch((e) => {
+    //         console.error("audio play failed:", e, { localPath, src });
+    //         player = null;
+    //     });
+    // }
 
     function getLanguageName(code: string | undefined): string {
         if (code === "KR") return "Korean";
