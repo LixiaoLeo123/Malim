@@ -9,47 +9,53 @@
     import { fade, fly } from "svelte/transition";
     import Flag from "./Flag.svelte";
     import type { Sentence, Block } from "../lib/types";
-    import { convertFileSrc } from "@tauri-apps/api/core";
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount, onDestroy } from "svelte";
     import { playAudio, stopAudio } from "../lib/audio";
+    import { invoke } from "@tauri-apps/api/core";
 
     $: article = $articles.find((a) => a.id === $activeArticleId) as any;
 
     let activeBlock: Block | null = null;
     let activeBlockEl: HTMLElement | null = null;
     let activeSentence: Sentence | null = null;
-    let player: HTMLAudioElement | null = null;
 
     let viewMode: "word" | "sentence" = "word";
 
     let popoverPosition = { top: 0, left: 0, align: "bottom", arrowLeft: 0 };
     let isGrammarExpanded = false;
 
+    let clickedLemmas = new Set<string>();
+    let animationFrameId: number;
+
     function handleKeydown(event: KeyboardEvent) {
-        if ((event.target as HTMLElement).tagName === 'INPUT' || (event.target as HTMLElement).tagName === 'TEXTAREA') {
+        if (
+            (event.target as HTMLElement).tagName === "INPUT" ||
+            (event.target as HTMLElement).tagName === "TEXTAREA"
+        ) {
             return;
         }
-        
-        switch(event.key) {
-            case '1':
+
+        switch (event.key) {
+            case "1":
                 event.preventDefault();
-                viewMode = 'word';
+                viewMode = "word";
                 activeSentence = null;
                 break;
-            case '2':
+            case "2":
                 event.preventDefault();
-                viewMode = 'sentence';
+                viewMode = "sentence";
                 activeBlock = null;
                 break;
         }
     }
-    
+
     onMount(() => {
-        window.addEventListener('keydown', handleKeydown);
+        window.addEventListener("keydown", handleKeydown);
     });
-    
+
     onDestroy(() => {
-        window.removeEventListener('keydown', handleKeydown);
+        window.removeEventListener("keydown", handleKeydown);
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
     });
 
     const colorMap: Record<string, string> = {
@@ -86,39 +92,6 @@
         return colorMap["noun"];
     }
 
-    // function stopAudio() {
-    //     console.log("1");
-    //     if (player) {
-    //         player.pause();
-    //         player.currentTime = 0;
-    //         player = null;
-    //     }
-    // }
-
-    // function playAudio(localPath?: string | null) {
-    //     stopAudio();
-    //     if (!localPath) return;
-
-    //     const normalized = localPath.replace(/\\/g, "/"); // Windows path normalize
-    //     const src = convertFileSrc(normalized);
-
-    //     player = new Audio(src);
-
-    //     player.onended = () => {
-    //         player = null;
-    //     };
-
-    //     player.onerror = (e) => {
-    //         console.error("audio error:", e);
-    //         player = null;
-    //     };
-
-    //     player.play().catch((e) => {
-    //         console.error("audio play failed:", e, { localPath, src });
-    //         player = null;
-    //     });
-    // }
-
     function getLanguageName(code: string | undefined): string {
         if (code === "KR") return "Korean";
         if (code === "RU") return "Russian";
@@ -131,6 +104,23 @@
         sentence: Sentence,
     ) {
         event.stopPropagation();
+
+        if (
+            viewMode === "word" &&
+            block.pos !== "unknown" &&
+            block.pos !== "punctuation" &&
+            block.lemma
+        ) {
+            if (!clickedLemmas.has(block.lemma)) {
+                clickedLemmas.add(block.lemma);
+                if ($settings.memoryModelEnabled) {
+                    invoke("record_word_click", {
+                        lemma: block.lemma,
+                        clicked: true,
+                    });
+                }
+            }
+        }
 
         if (viewMode === "word") {
             activeSentence = null;
@@ -152,6 +142,116 @@
                 playAudio(sentence.audio_path);
             }
         }
+    }
+
+    function handleFinishReading() {
+        if (!article || !article.sentences) return;
+
+        launchConfetti();
+
+        const allLemmasInArticle = new Set<string>();
+        article.sentences.forEach((s: Sentence) => {
+            s.blocks.forEach((b: Block) => {
+                if (b.pos !== "unknown" && b.pos !== "punctuation" && b.lemma) {
+                    allLemmasInArticle.add(b.lemma);
+                }
+            });
+        });
+
+        allLemmasInArticle.forEach((lemma) => {
+            if (!clickedLemmas.has(lemma) && $settings.memoryModelEnabled) {
+                invoke("record_word_click", { lemma: lemma, clicked: false });
+            }
+        });
+
+        clickedLemmas.clear();
+
+        let totalWordCount = 0;
+        
+        article.sentences.forEach((s: Sentence) => {
+            if (s.original) {
+                const trimmed = s.original.trim();
+                if (trimmed.length > 0) {
+                    const words = trimmed.split(/\s+/);
+                    totalWordCount += words.length;
+                }
+            }
+        });
+
+        invoke("update_daily_reading", { count: totalWordCount });
+    }
+
+    function launchConfetti() {
+        let canvas = document.getElementById(
+            "confetti-canvas",
+        ) as HTMLCanvasElement | null;
+
+        if (!canvas) {
+            console.error("Canvas element not found!");
+            return;
+        }
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const particles: any[] = [];
+        const colors = [
+            "#FFC700",
+            "#FF0080",
+            "#2E86DE",
+            "#10AC84",
+            "#FF6B6B",
+            "#5F27CD",
+        ];
+
+        for (let i = 0; i < 150; i++) {
+            particles.push({
+                x: Math.random() * canvas.width,
+                y: -20 - Math.random() * 200,
+                w: Math.random() * 10 + 5,
+                h: Math.random() * 6 + 3,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                vy: Math.random() * 3 + 2,
+                vx: (Math.random() - 0.5) * 4,
+                rotation: Math.random() * 360,
+                rotationSpeed: (Math.random() - 0.5) * 10,
+            });
+        }
+
+        let frame = 0;
+        const maxFrames = 1024;
+
+        function animate() {
+            if (!ctx || !canvas) return;
+
+            if (frame >= maxFrames) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                return;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            particles.forEach((p) => {
+                p.y += p.vy;
+                p.x += p.vx;
+                p.rotation += p.rotationSpeed;
+
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate((p.rotation * Math.PI) / 180);
+                ctx.fillStyle = p.color;
+                ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+                ctx.restore();
+            });
+
+            frame++;
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        animate();
     }
 
     function calculatePosition() {
@@ -301,6 +401,19 @@
                     {/each}
                 </div>
             {/each}
+
+            <div class="flex justify-center mt-16 mb-8">
+                <button
+                    class="relative px-8 py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold text-lg rounded-full shadow-lg
+                           hover:shadow-xl transform hover:scale-105 active:scale-100 transition-all duration-200
+                           hover:outline-none hover:ring-4 hover:ring-emerald-300 dark:hover:ring-emerald-800"
+                    on:click={handleFinishReading}
+                >
+                    <span class="relative z-10 flex items-center gap-2">
+                        🎉 Finish
+                    </span>
+                </button>
+            </div>
         {:else}
             <div class="text-zinc-400 text-center mt-20 dark:text-zinc-500">
                 No content loaded.
@@ -435,6 +548,11 @@
             </div>
         </div>
     {/if}
+
+    <canvas
+        id="confetti-canvas"
+        class="fixed inset-0 pointer-events-none z-[200]"
+    ></canvas>
 </div>
 
 <style>

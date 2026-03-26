@@ -18,6 +18,15 @@ use tokio::{
 };
 use unic_emoji_char::is_emoji;
 use unicode_normalization::UnicodeNormalization;
+use rusqlite::params;
+mod memory;
+use memory::{
+    get_vocabulary_expectation, get_words_in_p_range, record_word_click,
+    run_global_calibration, update_daily_reading, get_daily_reading, get_reading_by_date,
+    get_alpha
+};
+
+use crate::memory::init_db;
 
 // ---prompts---
 const BASE_RULES: &str = r#"
@@ -1277,9 +1286,7 @@ async fn parse_text(
 
                 sentence_audio = match sentence_handle {
                     None => None,
-                    Some(handle) => {
-                        handle.await.ok().flatten()
-                    }
+                    Some(handle) => handle.await.ok().flatten(),
                 };
             }
             // collect result from lemma accent task
@@ -1379,6 +1386,103 @@ fn delete_article_audio(app: AppHandle, article_id: String) -> Result<(), String
     Ok(())
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct InteractionPayload {
+    user_id: String,
+    lemma: String,
+    ts: i64,
+    clicked: i32,
+}
+
+#[derive(Debug, Deserialize)]
+struct PullResponse {
+    interactions: Vec<InteractionPayload>,
+}
+
+
+#[tauri::command]
+async fn sync_memory(app: AppHandle, server_url: String, user_id: String) -> Result<String, String> {
+    let last_ts: i64 = {
+        let conn = init_db(&app)?;
+        conn.query_row(
+            "SELECT COALESCE(MAX(ts), 0) FROM interactions", 
+            [], |row| row.get(0)
+        ).unwrap_or(0)
+    };
+
+    let client = reqwest::Client::new();
+    let pull_res = client
+        .post(format!("{}/pull", server_url))
+        .json(&InteractionPayload {
+            user_id: user_id.clone(),
+            lemma: String::new(),
+            ts: last_ts,
+            clicked: 0,
+        })
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+let pulled_data: Vec<InteractionPayload> = if pull_res.status().is_success() {
+        let resp: PullResponse = pull_res.json().await.map_err(|e| format!("JSON decode error: {}", e))?;
+        resp.interactions
+    } else {
+        vec![]
+    };
+
+    {
+        let conn = init_db(&app)?;
+        if !pulled_data.is_empty() {
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            for item in pulled_data {
+                tx.execute(
+                    "INSERT OR IGNORE INTO interactions (lemma, ts, clicked, synced) VALUES (?1, ?2, ?3, 1)",
+                    params![item.lemma, item.ts, item.clicked],
+                ).ok();
+            }
+            tx.commit().map_err(|e| e.to_string())?;
+        }
+    }
+    let unsynced_data: Vec<InteractionPayload> = {
+        let conn = init_db(&app)?;
+        let mut stmt = conn.prepare(
+            "SELECT lemma, ts, clicked FROM interactions WHERE synced = 0"
+        ).map_err(|e| e.to_string())?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(InteractionPayload {
+                user_id: user_id.clone(),
+                lemma: row.get(0)?,
+                ts: row.get(1)?,
+                clicked: row.get(2)?,
+            })
+        }).map_err(|e| e.to_string())?;
+
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    if !unsynced_data.is_empty() {
+        let push_res = client
+            .post(format!("{}/push", server_url))
+            .json(&serde_json::json!({
+                "user_id": user_id,
+                "interactions": unsynced_data
+            }))
+            .send()
+            .await
+            .map_err(|e| format!("Network error: {}", e))?;
+
+        if push_res.status().is_success() {
+            let conn = init_db(&app)?;
+            conn.execute("UPDATE interactions SET synced = 1 WHERE synced = 0", [])
+                .map_err(|e| e.to_string())?;
+            return Ok(format!("Synced {} records.", unsynced_data.len()));
+        }
+    }
+
+    Ok("Sync finished. No new data.".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1390,7 +1494,16 @@ pub fn run() {
             parse_text,
             save_data,
             load_data,
-            delete_article_audio
+            delete_article_audio,
+            get_words_in_p_range,
+            update_daily_reading,
+            get_vocabulary_expectation,
+            run_global_calibration,
+            record_word_click,
+            get_daily_reading,
+            get_reading_by_date,
+            get_alpha,
+            sync_memory
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -42,6 +42,10 @@ export const settings = writable<Settings>({
     sileroUrl: '',
     ruaccentEnabled: false,
     ruaccentUrl: '',
+    syncEnabled: false,
+    syncServerUrl: '',
+    userId: '',
+    memoryModelEnabled: true,
 })
 
 export const parsingQueue = writable<string[]>([]); // article id

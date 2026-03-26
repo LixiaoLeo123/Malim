@@ -19,7 +19,7 @@
 
     let showLangSelector = false;
     let wordCount = 0;
-    let unlisten: (() => void) | null = null;
+    
     $: wordCount = $editorDraft.content
         ? $editorDraft.content.trim().split(/\s+/).length
         : 0;

@@ -1,20 +1,19 @@
 use rand::seq::SliceRandom;
 use rusqlite::{params, Connection};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
-
+use unicode_normalization::UnicodeNormalization;
 const DEFAULT_S0: f64 = 0.05;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WordStat {
-    pub lemma: String,
-    pub s0: f64,
-    pub k: u32,       // total times
-    pub last_ts: i64, // timestamp
-    pub current_s: f64,
-}
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct WordStat {
+//     pub lemma: String,
+//     pub s0: f64,
+//     pub k: u32,       // total times
+//     pub last_ts: i64, // timestamp
+//     pub current_s: f64,
+// }
 
 #[derive(Debug, Clone)]
 struct Interaction {
@@ -22,11 +21,11 @@ struct Interaction {
     clicked: bool, // true = forget
 }
 
-#[derive(Debug, Serialize)]
-struct GlobalStats {
-    total_expected_vocabulary: f64,
-    total_words: u32,
-}
+// #[derive(Debug, Serialize)]
+// struct GlobalStats {
+//     total_expected_vocabulary: f64,
+//     total_words: u32,
+// }
 
 fn get_db_path(app: &AppHandle) -> PathBuf {
     app.path().app_data_dir().unwrap().join("memory.db")
@@ -48,7 +47,9 @@ pub fn init_db(app: &AppHandle) -> Result<Connection, String> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lemma TEXT NOT NULL,
             ts INTEGER NOT NULL,
-            clicked INTEGER NOT NULL
+            clicked INTEGER NOT NULL,
+            synced INTEGER DEFAULT 0,
+            UNIQUE(lemma, ts, clicked) 
         )",
         [],
     )
@@ -107,7 +108,7 @@ fn calc_likelihood_and_surprise(
     for (i, (dt, clicked)) in intervals.iter().enumerate() {
         let w = weights[i];
 
-        let s = s0 * (i + 2).powf(alpha);
+        let s = s0 * ((i + 2) as f64).powf(alpha);
         let p = (-dt / s).exp().clamp(1e-9, 1.0 - 1e-9);
 
         let point_ll = if *clicked { (1.0 - p).ln() } else { p.ln() };
@@ -153,7 +154,7 @@ fn calc_weighted_ll_only(s0: f64, alpha: f64, intervals: &[(f64, bool)], weights
     let mut ll = 0.0;
     for (i, (dt, clicked)) in intervals.iter().enumerate() {
         let w = weights[i];
-        let s = s0 * (i + 2).powf(alpha);
+        let s = s0 * ((i + 2) as f64).powf(alpha);
         let p = (-dt / s).exp().clamp(1e-9, 1.0 - 1e-9);
 
         if *clicked {
@@ -165,41 +166,65 @@ fn calc_weighted_ll_only(s0: f64, alpha: f64, intervals: &[(f64, bool)], weights
     ll
 }
 
-pub fn recompute_all(conn: &mut Connection) -> Result<(), String> {
+fn calculate_median(mut numbers: Vec<f64>) -> f64 {
+    if numbers.is_empty() {
+        return DEFAULT_S0;
+    }
+    numbers.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = numbers.len() / 2;
+    if numbers.len() % 2 == 0 {
+        (numbers[mid - 1] + numbers[mid]) / 2.0
+    } else {
+        numbers[mid]
+    }
+}
+
+// only recompute dirty s0 without alpha
+fn recompute_all(conn: &mut Connection) -> Result<(), String> {
     let current_alpha: f64 = conn
         .query_row("SELECT value FROM config WHERE key='alpha'", [], |row| {
             row.get(0)
         })
         .unwrap_or(0.3);
 
+    let fallback_s0: f64 = conn
+        .query_row(
+            "SELECT value FROM config WHERE key='fallback_s0'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(DEFAULT_S0);
+
     let mut raw_data: HashMap<String, Vec<Interaction>> = HashMap::new();
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT i.lemma, i.ts, i.clicked 
-         FROM interactions i
-         LEFT JOIN word_stats w ON i.lemma = w.lemma
-         WHERE w.dirty = 1 OR w.lemma IS NULL
-         ORDER BY i.ts ASC",
-        )
-        .map_err(|e| e.to_string())?;
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT i.lemma, i.ts, i.clicked 
+             FROM interactions i
+             LEFT JOIN word_stats w ON i.lemma = w.lemma
+             WHERE w.dirty = 1 OR w.lemma IS NULL
+             ORDER BY i.ts ASC",
+            )
+            .map_err(|e| e.to_string())?;
 
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i32>(2)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i32>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
 
-    for r in rows {
-        let (lemma, ts, clicked) = r.map_err(|e| e.to_string())?;
-        raw_data.entry(lemma).or_default().push(Interaction {
-            ts,
-            clicked: clicked == 1,
-        });
+        for r in rows {
+            let (lemma, ts, clicked) = r.map_err(|e| e.to_string())?;
+            raw_data.entry(lemma).or_default().push(Interaction {
+                ts,
+                clicked: clicked == 1,
+            });
+        }
     }
 
     if raw_data.is_empty() {
@@ -207,7 +232,7 @@ pub fn recompute_all(conn: &mut Connection) -> Result<(), String> {
     }
 
     let mut dataset: Vec<(String, Vec<(f64, bool)>, i64)> = Vec::new();
-    for (lemma, mut records) in raw_data {
+    for (lemma, records) in raw_data {
         if records.len() < 2 {
             continue;
         }
@@ -235,7 +260,7 @@ pub fn recompute_all(conn: &mut Connection) -> Result<(), String> {
         let has_remember = intervals.iter().any(|&(_, clicked)| !clicked);
         let is_valid_for_mle = intervals.len() >= 5 && has_forget && has_remember;
 
-        let mut s0 = DEFAULT_S0;
+        let mut s0 = fallback_s0;
 
         if is_valid_for_mle {
             for _ in 0..3 {
@@ -251,7 +276,7 @@ pub fn recompute_all(conn: &mut Connection) -> Result<(), String> {
         }
 
         let mut k = 1;
-        for (i, (_, clicked)) in intervals.iter().enumerate() {
+        for (i, (_, _)) in intervals.iter().enumerate() {
             if weights[i] > 0.5 {
                 k += 1;
             }
@@ -269,28 +294,30 @@ pub fn recompute_all(conn: &mut Connection) -> Result<(), String> {
     Ok(())
 }
 
-pub fn calibrate_global_model(conn: &mut Connection) -> Result<(), String> {
+fn calibrate_global_model(conn: &mut Connection) -> Result<(), String> {
     let mut raw_data: HashMap<String, Vec<Interaction>> = HashMap::new();
-    let mut stmt = conn
-        .prepare("SELECT lemma, ts, clicked FROM interactions ORDER BY ts ASC")
-        .map_err(|e| e.to_string())?;
+    {
+        let mut stmt = conn
+            .prepare("SELECT lemma, ts, clicked FROM interactions ORDER BY ts ASC")
+            .map_err(|e| e.to_string())?;
 
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i32>(2)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i32>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
 
-    for r in rows {
-        let (lemma, ts, clicked) = r.map_err(|e| e.to_string())?;
-        raw_data.entry(lemma).or_default().push(Interaction {
-            ts,
-            clicked: clicked == 1,
-        });
+        for r in rows {
+            let (lemma, ts, clicked) = r.map_err(|e| e.to_string())?;
+            raw_data.entry(lemma).or_default().push(Interaction {
+                ts,
+                clicked: clicked == 1,
+            });
+        }
     }
 
     if raw_data.is_empty() {
@@ -334,16 +361,19 @@ pub fn calibrate_global_model(conn: &mut Connection) -> Result<(), String> {
         let mut best_total_ll = f64::MIN;
         for &test_alpha in &alpha_candidates {
             let mut total_ll = 0.0;
-            
+
             for (_, intervals, _) in &valid_dataset {
                 let mut weights = vec![1.0; intervals.len()];
-                let mut s0 = 0.05;
+                let mut s0 = DEFAULT_S0;
 
                 for _ in 0..3 {
                     s0 = fit_s0_weighted(intervals, test_alpha, &weights);
-                    let (_, surprises) = calc_likelihood_and_surprise(s0, test_alpha, intervals, &weights);
+                    let (_, surprises) =
+                        calc_likelihood_and_surprise(s0, test_alpha, intervals, &weights);
                     for (w, surp) in weights.iter_mut().zip(surprises.iter()) {
-                        if *surp > 3.0 { *w *= 0.3; }
+                        if *surp > 3.0 {
+                            *w *= 0.3;
+                        }
                     }
                 }
                 total_ll += calc_weighted_ll_only(s0, test_alpha, intervals, &weights);
@@ -356,43 +386,63 @@ pub fn calibrate_global_model(conn: &mut Connection) -> Result<(), String> {
         }
     }
 
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let mut valid_s0s = Vec::new();
+    let mut fitted_data = HashMap::new();
 
-    tx.execute(
-        "INSERT OR REPLACE INTO config (key, value) VALUES ('alpha', ?1)",
-        params![best_alpha],
-    )?;
-
-    for (lemma, intervals, last_ts) in dataset {
-        let mut weights = vec![1.0; intervals.len()];
-
-        let has_forget = intervals.iter().any(|&(_, clicked)| clicked);
-        let has_remember = intervals.iter().any(|&(_, clicked)| !clicked);
+    for (lemma, intervals, _) in &dataset {
+        let has_forget = intervals.iter().any(|&(_, c)| c);
+        let has_remember = intervals.iter().any(|&(_, c)| !c);
         let is_valid_for_mle = intervals.len() >= 5 && has_forget && has_remember;
 
-        let mut s0 = DEFAULT_S0;
-
         if is_valid_for_mle {
+            let mut weights = vec![1.0; intervals.len()];
+            let mut s0 = DEFAULT_S0;
             for _ in 0..3 {
-                s0 = fit_s0_weighted(intervals, current_alpha, &weights);
+                s0 = fit_s0_weighted(intervals, best_alpha, &weights);
                 let (_, surprises) =
-                    calc_likelihood_and_surprise(s0, current_alpha, intervals, &weights);
+                    calc_likelihood_and_surprise(s0, best_alpha, intervals, &weights);
                 for (w, surp) in weights.iter_mut().zip(surprises.iter()) {
                     if *surp > 3.0 {
                         *w *= 0.3;
                     }
                 }
             }
+            valid_s0s.push(s0);
+            fitted_data.insert(lemma.clone(), (s0, weights));
         }
+    }
+
+    let new_fallback_s0 = calculate_median(valid_s0s);
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT OR REPLACE INTO config (key, value) VALUES ('alpha', ?1)",
+        params![best_alpha],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT OR REPLACE INTO config (key, value) VALUES ('fallback_s0', ?1)",
+        params![new_fallback_s0],
+    )
+    .map_err(|e| e.to_string())?;
+
+    for (lemma, intervals, last_ts) in dataset {
+        let (s0, weights) = if let Some((fitted_s0, w)) = fitted_data.remove(&lemma) {
+            (fitted_s0, w)
+        } else {
+            (new_fallback_s0, vec![1.0; intervals.len()])
+        };
 
         let mut k = 1;
-        for (i, (_, clicked)) in intervals.iter().enumerate() {
+        for (i, _) in intervals.iter().enumerate() {
             if weights[i] > 0.5 {
                 k += 1;
             }
         }
 
-        let current_s = s0 * (k as f64).powf(current_alpha);
+        let current_s = s0 * (k as f64).powf(best_alpha);
 
         tx.execute(
             "INSERT OR REPLACE INTO word_stats (lemma, s0, k, last_ts, current_s, dirty) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
@@ -406,6 +456,29 @@ pub fn calibrate_global_model(conn: &mut Connection) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn record_word_click(app: AppHandle, lemma: String, clicked: bool) -> Result<(), String> {
+    let lemma: String = lemma
+        .nfd()
+        .filter(|c| {
+            let cp = *c as u32;
+            !(0x0300..=0x036F).contains(&cp)
+        })
+        .collect();
+
+    let lemma = lemma.to_lowercase();
+
+    let contains_non_cyrillic = lemma.chars().any(|c| {
+        let cp = c as u32;
+        !(0x0400..=0x04FF).contains(&cp)
+    });
+
+    if contains_non_cyrillic {
+        return Ok(());
+    }
+    
+    if lemma.is_empty() {
+        return Ok(());
+    }
+
     let mut conn = init_db(&app)?;
     let now = chrono::Local::now().timestamp();
 
@@ -427,6 +500,7 @@ pub async fn record_word_click(app: AppHandle, lemma: String, clicked: bool) -> 
     Ok(())
 }
 
+
 #[tauri::command]
 pub async fn run_global_calibration(app: AppHandle) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
@@ -443,11 +517,25 @@ pub async fn run_global_calibration(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn get_alpha(app: AppHandle) -> Result<f64, String> {
+    let conn = init_db(&app).map_err(|e| e.to_string())?;
+    match conn.query_row(
+        "SELECT value FROM config WHERE key = 'alpha'", 
+        [], 
+        |row| row.get::<_, f64>(0)
+    ) {
+        Ok(val) => Ok(val),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0.3),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
 pub async fn get_vocabulary_expectation(app: AppHandle) -> Result<f64, String> {
-    let conn = init_db(&app)?;
+    let mut conn = init_db(&app)?;
     let now = chrono::Local::now().timestamp();
 
-    recompute_all(conn);
+    recompute_all(&mut conn)?;
 
     let mut stmt = conn
         .prepare("SELECT current_s, last_ts FROM word_stats")
@@ -474,8 +562,39 @@ pub async fn update_daily_reading(app: AppHandle, count: u32) -> Result<(), Stri
     conn.execute(
         "INSERT INTO daily_reading (date, count) VALUES (?1, ?2) ON CONFLICT(date) DO UPDATE SET count = count + ?2",
         params![today, count]
-    )?;
+    ).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_daily_reading(app: AppHandle) -> Result<u32, String> {
+    let conn = init_db(&app).map_err(|e| e.to_string())?;
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let result: Result<u32, rusqlite::Error> = conn.query_row(
+        "SELECT count FROM daily_reading WHERE date = ?1",
+        params![today],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(count) => Ok(count),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn get_reading_by_date(app: AppHandle, date_str: String) -> Result<u32, String> {
+    let conn = init_db(&app).map_err(|e| e.to_string())?;
+    let result: Result<u32, rusqlite::Error> = conn.query_row(
+        "SELECT count FROM daily_reading WHERE date = ?1",
+        params![date_str],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(count) => Ok(count),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[tauri::command]

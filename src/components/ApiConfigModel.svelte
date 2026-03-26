@@ -26,6 +26,11 @@
     let tempRuaccentEnabled = false;
     let tempRuaccentUrl = "http://127.0.0.1:8002";
 
+    let tempSyncEnabled = false;
+    let tempSyncServerUrl = "";
+    let tempUserId = "";
+    let tempMemoryModelEnabled = true;
+
     $: if (open) {
         tempKey = $settings.apiKey;
         tempUrl = $settings.apiUrl;
@@ -40,6 +45,10 @@
         tempQwenVoice = $settings.qwenVoice;
         tempRuaccentEnabled = $settings.ruaccentEnabled ?? false;
         tempRuaccentUrl = $settings.ruaccentUrl ?? "http://127.0.0.1:8002";
+        tempSyncEnabled = $settings.syncEnabled ?? false;
+        tempSyncServerUrl = $settings.syncServerUrl ?? "";
+        tempUserId = $settings.userId ?? "";
+        tempMemoryModelEnabled = $settings.memoryModelEnabled ?? true;
     }
 
     function handleSave() {
@@ -57,6 +66,10 @@
             qwenVoice: tempQwenVoice.trim(),
             ruaccentEnabled: tempRuaccentEnabled,
             ruaccentUrl: tempRuaccentUrl.trim(),
+            syncEnabled: tempSyncEnabled,
+            syncServerUrl: tempSyncServerUrl.trim(),
+            userId: tempUserId.trim(),
+            memoryModelEnabled: tempMemoryModelEnabled,
         });
         open = false;
     }
@@ -199,6 +212,93 @@
                     </label>
                 </div>
             {/if}
+
+            <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
+
+            <div class="flex items-center justify-between mt-3 mb-2">
+                <span class="text-sm text-zinc-600 dark:text-zinc-300"
+                    >Enable Memory Model</span
+                >
+                <button
+                    type="button"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempMemoryModelEnabled
+                        ? 'bg-zinc-900 dark:bg-zinc-100'
+                        : 'bg-zinc-300 dark:bg-zinc-700'}"
+                    aria-label="Enable Memory Model"
+                    aria-pressed={tempMemoryModelEnabled}
+                    on:click={() => (tempMemoryModelEnabled = !tempMemoryModelEnabled)}
+                >
+                    <span
+                        class="inline-block h-5 w-5 transform rounded-full bg-white dark:bg-zinc-900 transition-transform {tempMemoryModelEnabled
+                            ? 'translate-x-5'
+                            : 'translate-x-1'}"
+                    ></span>
+                </button>
+            </div>
+
+            <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
+
+            <div class="flex items-center justify-between mt-3 mb-2">
+                <span class="text-sm text-zinc-600 dark:text-zinc-300"
+                    >Enable Remote Sync Server</span
+                >
+                <button
+                    type="button"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempSyncEnabled
+                        ? 'bg-zinc-900 dark:bg-zinc-100'
+                        : 'bg-zinc-300 dark:bg-zinc-700'}"
+                    aria-label="Enable Remote Sync Server"
+                    aria-pressed={tempSyncEnabled}
+                    on:click={() => (tempSyncEnabled = !tempSyncEnabled)}
+                >
+                    <span
+                        class="inline-block h-5 w-5 transform rounded-full bg-white dark:bg-zinc-900 transition-transform {tempSyncEnabled
+                            ? 'translate-x-5'
+                            : 'translate-x-1'}"
+                    ></span>
+                </button>
+            </div>
+
+            {#if tempSyncEnabled}
+                <div class="mb-4">
+                    <label class="block">
+                        <span
+                            class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                        >
+                            Sync Server URL
+                        </span>
+                        <input
+                            type="text"
+                            bind:value={tempSyncServerUrl}
+                            class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
+                            placeholder="http://your-sync-server:3000"
+                        />
+                        <span class="block text-xs text-zinc-400 mt-1">
+                            Address of your Malim sync server (for interactions
+                            sync).
+                        </span>
+                    </label>
+                </div>
+                <div class="mb-4">
+                    <label class="block">
+                        <span
+                            class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                        >
+                            Sync Server User ID
+                        </span>
+                        <input
+                            type="text"
+                            bind:value={tempUserId}
+                            class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
+                            placeholder="Your User ID"
+                        />
+                        <span class="block text-xs text-zinc-400 mt-1">
+                            User ID for your Malim sync server.
+                        </span>
+                    </label>
+                </div>
+            {/if}
+
             <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
             <!-- Auto Speak -->
             <div class="flex items-center justify-between mt-3">

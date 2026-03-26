@@ -53,4 +53,8 @@ export interface Settings {
     sileroUrl: string;
     ruaccentEnabled: boolean;
     ruaccentUrl: string;
+    syncEnabled: boolean;
+    syncServerUrl: string;
+    userId: string; // for sync identification
+    memoryModelEnabled: boolean;
 }

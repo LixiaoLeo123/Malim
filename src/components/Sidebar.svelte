@@ -1,27 +1,38 @@
 <script lang="ts">
     import { slide, fly } from "svelte/transition";
     import Flag from "./Flag.svelte";
+    import StatsModal from "./StatsModal.svelte";
+    import PromptGenerator from "./PromptGenerator.svelte";
     import {
         articles,
         activeArticleId,
         currentView,
         isSidebarOpen,
         editorDraft,
+        settings,
     } from "../lib/stores";
     import type { Article } from "../lib/types";
-    import { Plus, Trash2, Pencil, X } from "lucide-svelte";
+    import { Plus, Trash2, Pencil, X, Sparkles, RefreshCw } from "lucide-svelte";
     import ApiConfigModal from "./ApiConfigModel.svelte";
-    import { settings } from "../lib/stores";
     import { invoke } from "@tauri-apps/api/core";
 
     let showApiConfig = false;
+    let showStatsModal = false;
+    let showPromptGenerator = false;
+
+    type SyncStatus = "idle" | "syncing" | "success" | "error";
+    let syncStatus: SyncStatus = "idle";
+
+    $: showSyncButton = 
+        $settings.syncEnabled && 
+        $settings.syncServerUrl && 
+        $settings.userId;
 
     let contextMenuTarget: string | null = null;
     let deleteConfirmId: string | null = null;
     let pressTimer: number;
 
     function handleAdd() {
-        // editorDraft.set({ title: '', content: '', language: 'KR' });
         activeArticleId.set(null);
         currentView.set("editor");
         isSidebarOpen.set(false);
@@ -61,9 +72,7 @@
     function editArticle(article: Article) {
         editorDraft.set({
             title: article.title,
-            content: article.sentences
-                ? article.sentences.map((s) => s.original).join("")
-                : "",
+            content: article.draftContent ? article.draftContent : "",
             language: article.language,
         });
         activeArticleId.set(article.id);
@@ -71,6 +80,28 @@
         contextMenuTarget = null;
         isSidebarOpen.set(false);
     }
+
+    async function handleSync() {
+        if (syncStatus === "syncing") return;
+
+        syncStatus = "syncing";
+        try {
+            const res = await invoke<string>("sync_memory", {
+                serverUrl: $settings.syncServerUrl,
+                userId: $settings.userId,
+            });
+            console.log(res);
+            syncStatus = "success";
+        } catch (e) {
+            console.error("Sync failed:", e);
+            syncStatus = "error";
+        } finally {
+            setTimeout(() => {
+                syncStatus = "idle";
+            }, 2000);
+        }
+    }
+
     let listLimit = 20;
     $: visibleArticles = $articles.slice(0, listLimit);
 
@@ -93,17 +124,54 @@
     <div
         class="p-4 border-b border-zinc-200 flex justify-between items-center bg-white dark:bg-zinc-950 dark:border-zinc-800 pt-[env(safe-area-inset-top)]"
     >
-        <h1
-            class="font-bold text-xl tracking-tight text-zinc-800 dark:text-zinc-100"
+        <button
+            type="button"
+            class="font-bold text-xl tracking-tight active:scale-95 transition duration-100 ease-out dark:text-zinc-200"
+            on:click={() => (showStatsModal = true)}
         >
             Malim
-        </h1>
-        <button
-            on:click={handleAdd}
-            class="p-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full transition duration-100 ease-out dark:text-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
-        >
-            <Plus size={20} />
         </button>
+
+        <div class="flex items-center gap-2">
+            {#if showSyncButton}
+                <button
+                    on:click={handleSync}
+                    disabled={syncStatus === 'syncing'}
+                    class="p-2 rounded-full transition duration-100 ease-out focus:outline-none
+                        {syncStatus === 'syncing'
+                            ? 'bg-zinc-100 dark:bg-zinc-800 cursor-wait animate-spin'
+                            : syncStatus === 'success'
+                            ? 'text-emerald-500 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 dark:hover:bg-zinc-800'
+                            : syncStatus === 'error'
+                            ? 'text-red-500 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 dark:hover:bg-zinc-800'
+                            : 'hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700'}"
+                    title={syncStatus === 'syncing'
+                        ? 'Syncing...'
+                        : syncStatus === 'success'
+                        ? 'Sync Successful'
+                        : syncStatus === 'error'
+                        ? 'Sync Failed'
+                        : 'Sync Data'}
+                >
+                    <RefreshCw size={20} />
+                </button>
+            {/if}
+
+            <button
+                on:click={() => (showPromptGenerator = true)}
+                class="p-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full transition duration-100 ease-out dark:text-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+                title="Generate Article Prompt"
+            >
+                <Sparkles size={20} />
+            </button>
+
+            <button
+                on:click={handleAdd}
+                class="p-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full transition duration-100 ease-out dark:text-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+            >
+                <Plus size={20} />
+            </button>
+        </div>
     </div>
 
     <div
@@ -187,8 +255,7 @@
                         </div>
 
                         <button
-                            on:click|stopPropagation={() =>
-                                editArticle(article)}
+                            on:click|stopPropagation={() => editArticle(article)}
                             class="flex flex-col items-center justify-center w-16 hover:text-blue-400 transition-colors"
                         >
                             <Pencil size={18} />
@@ -217,7 +284,9 @@
             on:click={() => (showApiConfig = true)}
         >
             <span>
-                {($settings.apiKey && $settings.apiUrl && $settings.modelName) ? "API configured ✓" : "Configure API"}
+                {$settings.apiKey && $settings.apiUrl && $settings.modelName
+                    ? "API configured ✓"
+                    : "Configure API"}
             </span>
         </button>
 
@@ -225,12 +294,15 @@
     </div>
 </div>
 
+<StatsModal bind:open={showStatsModal} />
+<PromptGenerator bind:open={showPromptGenerator} />
+
 <style>
     .no-scrollbar::-webkit-scrollbar {
         display: none;
     }
     .no-scrollbar {
-        -ms-overflow-style: none;  /* IE and Edge */
-        scrollbar-width: none;  /* Firefox */
+        -ms-overflow-style: none; /* IE and Edge */
+        scrollbar-width: none; /* Firefox */
     }
 </style>

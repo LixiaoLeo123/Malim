@@ -1,0 +1,8 @@
+/home/leo/Documents/code/tauri/malim/Malim/malim_server/target/release/deps/tracing_log-6f0bd7ea294d9622.d: /home/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-log-0.2.0/src/lib.rs /home/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-log-0.2.0/src/log_tracer.rs
+
+/home/leo/Documents/code/tauri/malim/Malim/malim_server/target/release/deps/libtracing_log-6f0bd7ea294d9622.rlib: /home/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-log-0.2.0/src/lib.rs /home/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-log-0.2.0/src/log_tracer.rs
+
+/home/leo/Documents/code/tauri/malim/Malim/malim_server/target/release/deps/libtracing_log-6f0bd7ea294d9622.rmeta: /home/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-log-0.2.0/src/lib.rs /home/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-log-0.2.0/src/log_tracer.rs
+
+/home/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-log-0.2.0/src/lib.rs:
+/home/leo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tracing-log-0.2.0/src/log_tracer.rs:
