@@ -40,11 +40,11 @@
         tempPreCacheAudio = $settings.preCacheAudio;
         tempTtsConcurrency = $settings.ttsConcurrency;
         tempTtsApi = $settings.ttsApi ?? "edge-tts";
-        tempSileroUrl = $settings.sileroUrl ?? "http://127.0.0.1:8001";
+        tempSileroUrl = $settings.sileroUrl ?? "";
         tempQwenApiKey = $settings.qwenApiKey;
         tempQwenVoice = $settings.qwenVoice;
         tempRuaccentEnabled = $settings.ruaccentEnabled ?? false;
-        tempRuaccentUrl = $settings.ruaccentUrl ?? "http://127.0.0.1:8002";
+        tempRuaccentUrl = $settings.ruaccentUrl ?? "";
         tempSyncEnabled = $settings.syncEnabled ?? false;
         tempSyncServerUrl = $settings.syncServerUrl ?? "";
         tempUserId = $settings.userId ?? "";
@@ -122,7 +122,7 @@
                         type="text"
                         bind:value={tempUrl}
                         class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
-                        placeholder=""
+                        placeholder="https://api.example.com"
                     />
                 </label>
 
@@ -207,7 +207,7 @@
                             type="text"
                             bind:value={tempRuaccentUrl}
                             class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
-                            placeholder="http://127.0.0.1:8002/accentize"
+                            placeholder="http://127.0.0.1:8002/"
                         />
                     </label>
                 </div>
@@ -274,8 +274,7 @@
                             placeholder="http://your-sync-server:3000"
                         />
                         <span class="block text-xs text-zinc-400 mt-1">
-                            Address of your Malim sync server (for interactions
-                            sync).
+                            Address of your Malim sync server (for memory sync).
                         </span>
                     </label>
                 </div>
@@ -477,8 +476,7 @@
                             placeholder="http://127.0.0.1:8001"
                         />
                         <span class="block text-xs text-zinc-400 mt-1">
-                            Enter the address of your Silero TTS server (e.g.,
-                            http://127.0.0.1:8001)
+                            Enter the address of your Silero TTS server.
                         </span>
                     </label>
                 {/if}

@@ -57,7 +57,16 @@ async function load() {
 
     const data = JSON.parse(raw);
 
-    if (data.articles) articles.set(data.articles);
+    if (data.articles) {
+        const cleanArticles = data.articles.map((item: Article) => {
+            if (item.status === "parsing") {
+                return { ...item, status: "error" as const };
+            }
+            return item;
+        });
+        articles.set(cleanArticles);
+    }
+    
     if (data.draft) editorDraft.set(data.draft);
     if (data.settings) settings.set(data.settings);
 }

@@ -6,15 +6,13 @@
         activeArticleId,
         settings,
         parsingQueue,
-        isProcessingQueue,
     } from "../lib/stores";
     import { ArrowLeft, Check, ChevronDown } from "lucide-svelte";
     import { slide } from "svelte/transition";
-    import { invoke } from "@tauri-apps/api/core";
     import { v4 as uuidv4 } from "uuid";
     import Flag from "./Flag.svelte";
     import type { Article } from "../lib/types";
-    import { listen } from "@tauri-apps/api/event";
+    import { processQueue } from "../lib/parser";
     import { onDestroy } from "svelte";
 
     let showLangSelector = false;
@@ -30,84 +28,6 @@
     onDestroy(() => {
         // if (unlisten) unlisten();
     });
-    async function processQueue() {
-        if ($isProcessingQueue || $parsingQueue.length === 0) return;
-        isProcessingQueue.set(true);
-        const currentId = $parsingQueue[0];
-        const currentArticle = $articles.find((a) => a.id === currentId);
-        if (!currentArticle) {
-            parsingQueue.update((q) => q.slice(1));
-            isProcessingQueue.set(false);
-            processQueue();
-            return;
-        }
-        const unlisten = await listen<any>("parsing-progress", (event) => {
-            const payload = event.payload;
-            if (payload.id === currentId) {
-                articles.update((items) =>
-                    items.map((i) => {
-                        if (i.id === currentId) {
-                            return {
-                                ...i,
-                                parsingProgress: payload.percent,
-                            };
-                        }
-                        return i;
-                    }),
-                );
-            }
-        });
-
-        try {
-            const result: any = await invoke("parse_text", {
-                id: currentId,
-                text: currentArticle.draftContent,
-                language: currentArticle.language,
-                apiKey: $settings.apiKey,
-                apiUrl: $settings.apiUrl,
-                modelName: $settings.modelName,
-                concurrency: $settings.concurrency,
-                ttsConcurrency: $settings.ttsConcurrency,
-                preCacheAudio: $settings.preCacheAudio,
-                ttsApi: $settings.ttsApi,
-                qwenApiKey: $settings.qwenApiKey,
-                qwenVoice: $settings.qwenVoice,
-                sileroTtsUrl: $settings.sileroUrl,
-                ruaccentEnabled: $settings.ruaccentEnabled,
-                ruaccentUrl: $settings.ruaccentUrl,
-                oldSentences: currentArticle.sentences || null,
-            });
-
-            articles.update((items) =>
-                items.map((i) => {
-                    if (i.id === currentId) {
-                        return {
-                            ...i,
-                            status: "done",
-                            sentences: result,
-                            parsingProgress: 100,
-                        };
-                    }
-                    return i;
-                }),
-            );
-        } catch (e) {
-            console.error("Analysis Failed:", e);
-            articles.update((items) =>
-                items.map((i) =>
-                    i.id === currentId
-                        ? { ...i, status: "error", parsingProgress: 0 }
-                        : i,
-                ),
-            );
-            alert("AI Analysis Error: " + e);
-        } finally {
-            unlisten();
-            parsingQueue.update((q) => q.slice(1));
-            isProcessingQueue.set(false);
-            processQueue();
-        }
-    }
 
     async function handleConfirm() {
         const contentSnapshot = $editorDraft.content;

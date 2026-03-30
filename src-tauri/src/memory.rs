@@ -231,9 +231,24 @@ fn recompute_all(conn: &mut Connection) -> Result<(), String> {
         return Ok(());
     }
 
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
     let mut dataset: Vec<(String, Vec<(f64, bool)>, i64)> = Vec::new();
     for (lemma, records) in raw_data {
-        if records.len() < 2 {
+        if records.is_empty() {
+            continue;
+        }
+
+        if records.len() == 1 {
+            let last_ts = records[0].ts;
+            let s0 = fallback_s0;
+            let k = 1;
+            let current_s = s0 * (k as f64).powf(current_alpha);
+
+            tx.execute(
+                "INSERT OR REPLACE INTO word_stats (lemma, s0, k, last_ts, current_s, dirty) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+                params![lemma, s0, k, last_ts, current_s]
+            ).map_err(|e| e.to_string())?;
             continue;
         }
         let last_ts = records.last().unwrap().ts;
@@ -250,8 +265,6 @@ fn recompute_all(conn: &mut Connection) -> Result<(), String> {
             dataset.push((lemma, intervals, last_ts));
         }
     }
-
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     for (lemma, intervals, last_ts) in &dataset {
         let mut weights = vec![1.0; intervals.len()];
@@ -326,7 +339,7 @@ fn calibrate_global_model(conn: &mut Connection) -> Result<(), String> {
 
     let mut dataset: Vec<(String, Vec<(f64, bool)>, i64)> = Vec::with_capacity(raw_data.len());
     for (lemma, records) in raw_data {
-        if records.len() < 2 {
+        if records.is_empty() {
             continue;
         }
 
@@ -340,9 +353,7 @@ fn calibrate_global_model(conn: &mut Connection) -> Result<(), String> {
             }
         }
 
-        if !intervals.is_empty() {
-            dataset.push((lemma, intervals, last_ts));
-        }
+        dataset.push((lemma, intervals, last_ts));
     }
 
     let valid_dataset: Vec<_> = dataset
@@ -474,7 +485,7 @@ pub async fn record_word_click(app: AppHandle, lemma: String, clicked: bool) -> 
     if contains_non_cyrillic {
         return Ok(());
     }
-    
+
     if lemma.is_empty() {
         return Ok(());
     }
@@ -500,7 +511,6 @@ pub async fn record_word_click(app: AppHandle, lemma: String, clicked: bool) -> 
     Ok(())
 }
 
-
 #[tauri::command]
 pub async fn run_global_calibration(app: AppHandle) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
@@ -519,11 +529,9 @@ pub async fn run_global_calibration(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub fn get_alpha(app: AppHandle) -> Result<f64, String> {
     let conn = init_db(&app).map_err(|e| e.to_string())?;
-    match conn.query_row(
-        "SELECT value FROM config WHERE key = 'alpha'", 
-        [], 
-        |row| row.get::<_, f64>(0)
-    ) {
+    match conn.query_row("SELECT value FROM config WHERE key = 'alpha'", [], |row| {
+        row.get::<_, f64>(0)
+    }) {
         Ok(val) => Ok(val),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0.3),
         Err(e) => Err(e.to_string()),

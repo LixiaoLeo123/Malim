@@ -15,6 +15,8 @@
 
     $: article = $articles.find((a) => a.id === $activeArticleId) as any;
 
+    let lastClickedBlock: Block | null = null;
+
     let activeBlock: Block | null = null;
     let activeBlockEl: HTMLElement | null = null;
     let activeSentence: Sentence | null = null;
@@ -113,12 +115,13 @@
         ) {
             if (!clickedLemmas.has(block.lemma)) {
                 clickedLemmas.add(block.lemma);
-                if ($settings.memoryModelEnabled) {
+                if ($settings.memoryModelEnabled && block.lemma != lastClickedBlock?.lemma) {
                     invoke("record_word_click", {
                         lemma: block.lemma,
                         clicked: true,
                     });
                 }
+                lastClickedBlock = block;
             }
         }
 

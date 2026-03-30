@@ -3,6 +3,7 @@ use futures::stream::{self, StreamExt};
 use msedge_tts::tts::{client::connect, SpeechConfig};
 use msedge_tts::voice::Voice as EdgeVoice;
 use reqwest::Client;
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -18,15 +19,13 @@ use tokio::{
 };
 use unic_emoji_char::is_emoji;
 use unicode_normalization::UnicodeNormalization;
-use rusqlite::params;
 mod memory;
-use memory::{
-    get_vocabulary_expectation, get_words_in_p_range, record_word_click,
-    run_global_calibration, update_daily_reading, get_daily_reading, get_reading_by_date,
-    get_alpha
-};
-
 use crate::memory::init_db;
+use memory::{
+    get_alpha, get_daily_reading, get_reading_by_date, get_vocabulary_expectation,
+    get_words_in_p_range, record_word_click, run_global_calibration, update_daily_reading,
+};
+use rusqlite::Connection;
 
 // ---prompts---
 const BASE_RULES: &str = r#"
@@ -479,7 +478,7 @@ pub async fn qwen_tts_mp3(
     };
     let parameters = if !qwen_voice.is_empty() {
         Some(TtsParameters {
-            instructions: Some(qwen_voice.to_string()),
+            instructions: None, //Some(qwen_voice.to_string()),
             optimize_instructions: Some(true),
             stream: Some(false),
         })
@@ -1079,7 +1078,6 @@ async fn parse_text(
     let tasks = raw_sentences.into_iter().enumerate().map(|(i, raw)| {
         let ctx = ctx.clone();
         async move {
-            // cache sentence audio in parallel with AI processing
             let sentence_handle = if pre_cache_audio {
                 let ctx = ctx.clone();
                 let raw = raw.clone();
@@ -1103,22 +1101,107 @@ async fn parse_text(
             } else {
                 None
             };
+
+            let is_ru =
+                ctx.language.to_lowercase() == "ru" || ctx.language.to_lowercase() == "russian";
             let cached = ctx.old_map.get(&raw).cloned();
             let mut lemma_accent_task = None;
+
+            let align_accents = |blocks: &mut Vec<WordBlock>, accented_sentence: String| {
+                let mut accented_iter = accented_sentence.chars().peekable();
+                let chars_match = |a: char, b: char| -> bool {
+                    if a == b {
+                        return true;
+                    }
+                    let a_low = a.to_lowercase().next();
+                    let b_low = b.to_lowercase().next();
+                    a_low == b_low
+                        || (a_low == Some('ё') && b_low == Some('е'))
+                        || (a_low == Some('е') && b_low == Some('ё'))
+                };
+
+                for block in blocks {
+                    let clean_block = block.text.replace('\u{0301}', "");
+                    let mut new_text = String::new();
+
+                    for bc in clean_block.chars() {
+                        let mut matched = false;
+                        while let Some(&ac) = accented_iter.peek() {
+                            if ac == '\u{0301}' {
+                                new_text.push(accented_iter.next().unwrap());
+                            } else if chars_match(ac, bc) {
+                                new_text.push(accented_iter.next().unwrap());
+                                matched = true;
+                                break;
+                            } else {
+                                accented_iter.next();
+                            }
+                        }
+                        if !matched {
+                            new_text.push(bc);
+                        }
+                    }
+
+                    while let Some(&next_c) = accented_iter.peek() {
+                        if next_c == '\u{0301}' {
+                            new_text.push(accented_iter.next().unwrap());
+                        } else {
+                            break;
+                        }
+                    }
+
+                    block.text = new_text;
+                }
+            };
+
             let (mut blocks, translation) = if cached.as_ref().map_or(false, |b| {
                 b.blocks.last().map_or(false, |last| last.pos != "error")
             }) {
-                let b = cached.unwrap();
+                let mut b = cached.unwrap();
+                let has_accents = b.blocks.iter().any(|block| block.text.contains('\u{0301}'));
+                if is_ru && ruaccent_enabled && !has_accents {
+                    let clean_raw = raw.replace('\u{0301}', "");
+                    if let Ok(accented_sentence) =
+                        fetch_accented_text(&clean_raw, &ctx.ruaccent_url).await
+                    {
+                        align_accents(&mut b.blocks, accented_sentence);
+                    }
+                    let lemmas_to_accentize: Vec<(usize, String)> = b
+                        .blocks
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, block)| block.lemma.clone().map(|l| (i, l)))
+                        .collect();
+
+                    let ruaccent_url_for_lemma = ctx.ruaccent_url.clone();
+                    lemma_accent_task = Some(tokio::spawn(async move {
+                        if !lemmas_to_accentize.is_empty() {
+                            stream::iter(lemmas_to_accentize)
+                                .map(|(idx, lemma)| {
+                                    let url = ruaccent_url_for_lemma.clone();
+                                    async move {
+                                        let clean_lemma = lemma.replace('\u{0301}', "");
+                                        let accented = fetch_accented_text(&clean_lemma, &url)
+                                            .await
+                                            .unwrap_or(lemma);
+                                        (idx, accented)
+                                    }
+                                })
+                                .buffer_unordered(8)
+                                .collect::<Vec<_>>()
+                                .await
+                        } else {
+                            Vec::new()
+                        }
+                    }));
+                }
+
                 (b.blocks, b.translation)
             } else {
-                // clear possible stress marks
                 let clean_raw = raw.replace('\u{0301}', "");
-
                 let prompt = build_prompt(&ctx.language, &raw, !ruaccent_enabled);
                 let ai_future = call_ai_api(&ctx.api_key, &ctx.api_url, &ctx.model_name, prompt);
 
-                let is_ru =
-                    ctx.language.to_lowercase() == "ru" || ctx.language.to_lowercase() == "russian";
                 let accent_future = async {
                     if is_ru && ruaccent_enabled {
                         fetch_accented_text(&clean_raw, &ctx.ruaccent_url)
@@ -1136,7 +1219,6 @@ async fn parse_text(
                     Err(err) => (
                         vec![WordBlock {
                             text: raw.clone(),
-                            // a marker
                             pos: "error".to_string(),
                             definition: format!("Error: {}", err),
                             chinese_root: None,
@@ -1152,58 +1234,10 @@ async fn parse_text(
                         "Translation unavailable due to error.".to_string(),
                     ),
                 };
-                // Silero auto stress are more accurate for regular words, while ruaccent is better at handling irregular words
-                // so we use ruaccent for words and keep silero for sentences to maximize accuracy
-                // save the sentence for TTS
-                // let accented_sentence = accent_opt.clone();
                 if let Some(accented_sentence) = accent_opt {
-                    let mut accented_iter = accented_sentence.chars().peekable();
-
-                    let chars_match = |a: char, b: char| -> bool {
-                        if a == b {
-                            return true;
-                        }
-                        let a_low = a.to_lowercase().next();
-                        let b_low = b.to_lowercase().next();
-                        a_low == b_low
-                            || (a_low == Some('ё') && b_low == Some('е'))
-                            || (a_low == Some('е') && b_low == Some('ё'))
-                    };
-
-                    for block in &mut new_blocks {
-                        let clean_block = block.text.replace('\u{0301}', "");
-                        let mut new_text = String::new();
-
-                        for bc in clean_block.chars() {
-                            let mut matched = false;
-                            while let Some(&ac) = accented_iter.peek() {
-                                if ac == '\u{0301}' {
-                                    new_text.push(accented_iter.next().unwrap());
-                                } else if chars_match(ac, bc) {
-                                    new_text.push(accented_iter.next().unwrap());
-                                    matched = true;
-                                    break;
-                                } else {
-                                    accented_iter.next();
-                                }
-                            }
-                            if !matched {
-                                new_text.push(bc);
-                            }
-                        }
-
-                        while let Some(&next_c) = accented_iter.peek() {
-                            if next_c == '\u{0301}' {
-                                new_text.push(accented_iter.next().unwrap());
-                            } else {
-                                break;
-                            }
-                        }
-
-                        block.text = new_text;
-                    }
+                    align_accents(&mut new_blocks, accented_sentence);
                 }
-                // add stress marks to lemma
+
                 if ruaccent_enabled && is_ru {
                     let lemmas_to_accentize: Vec<(usize, String)> = new_blocks
                         .iter()
@@ -1399,69 +1433,98 @@ struct PullResponse {
     interactions: Vec<InteractionPayload>,
 }
 
+fn get_last_sync_ts(conn: &Connection) -> i64 {
+    conn.query_row(
+        "SELECT value FROM config WHERE key = 'last_sync_ts'",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap_or(0)
+}
+
+fn set_last_sync_ts(conn: &Connection, ts: i64) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO config (key, value) VALUES ('last_sync_ts', ?1)",
+        [ts],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 #[tauri::command]
-async fn sync_memory(app: AppHandle, server_url: String, user_id: String) -> Result<String, String> {
-    let last_ts: i64 = {
-        let conn = init_db(&app)?;
-        conn.query_row(
-            "SELECT COALESCE(MAX(ts), 0) FROM interactions", 
-            [], |row| row.get(0)
-        ).unwrap_or(0)
-    };
+async fn sync_memory(
+    app: AppHandle,
+    server_url: String,
+    user_id: String,
+) -> Result<String, String> {
+    let conn = init_db(&app)?;
+    let last_sync_ts = get_last_sync_ts(&conn);
+    let mut new_watermark = last_sync_ts;
+    drop(conn);
 
     let client = reqwest::Client::new();
+
     let pull_res = client
         .post(format!("{}/pull", server_url))
         .json(&InteractionPayload {
             user_id: user_id.clone(),
             lemma: String::new(),
-            ts: last_ts,
+            ts: last_sync_ts,
             clicked: 0,
         })
         .send()
         .await
         .map_err(|e| format!("Network error: {}", e))?;
 
-let pulled_data: Vec<InteractionPayload> = if pull_res.status().is_success() {
-        let resp: PullResponse = pull_res.json().await.map_err(|e| format!("JSON decode error: {}", e))?;
+    let pulled_data: Vec<InteractionPayload> = if pull_res.status().is_success() {
+        let resp: PullResponse = pull_res
+            .json()
+            .await
+            .map_err(|e| format!("JSON decode error: {}", e))?;
         resp.interactions
     } else {
         vec![]
     };
 
-    {
-        let conn = init_db(&app)?;
-        if !pulled_data.is_empty() {
-            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-            for item in pulled_data {
-                tx.execute(
-                    "INSERT OR IGNORE INTO interactions (lemma, ts, clicked, synced) VALUES (?1, ?2, ?3, 1)",
-                    params![item.lemma, item.ts, item.clicked],
-                ).ok();
-            }
-            tx.commit().map_err(|e| e.to_string())?;
-        }
-    }
-    let unsynced_data: Vec<InteractionPayload> = {
-        let conn = init_db(&app)?;
-        let mut stmt = conn.prepare(
-            "SELECT lemma, ts, clicked FROM interactions WHERE synced = 0"
-        ).map_err(|e| e.to_string())?;
+    let conn = init_db(&app)?;
+    if !pulled_data.is_empty() {
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        for item in &pulled_data {
+            tx.execute(
+                "INSERT OR IGNORE INTO interactions (lemma, ts, clicked, synced) VALUES (?1, ?2, ?3, 1)",
+                params![item.lemma, item.ts, item.clicked],
+            ).ok();
 
-        let rows = stmt.query_map([], |row| {
-            Ok(InteractionPayload {
-                user_id: user_id.clone(),
-                lemma: row.get(0)?,
-                ts: row.get(1)?,
-                clicked: row.get(2)?,
+            if item.ts > new_watermark {
+                new_watermark = item.ts;
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+
+    let unsynced_data: Vec<InteractionPayload> = {
+        let mut stmt = conn
+            .prepare("SELECT lemma, ts, clicked FROM interactions WHERE synced = 0")
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(InteractionPayload {
+                    user_id: user_id.clone(),
+                    lemma: row.get(0)?,
+                    ts: row.get(1)?,
+                    clicked: row.get(2)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         rows.filter_map(|r| r.ok()).collect()
     };
+    drop(conn);
 
     if !unsynced_data.is_empty() {
+        let local_max_ts = unsynced_data.iter().map(|i| i.ts).max().unwrap_or(0);
+
         let push_res = client
             .post(format!("{}/push", server_url))
             .json(&serde_json::json!({
@@ -1472,15 +1535,22 @@ let pulled_data: Vec<InteractionPayload> = if pull_res.status().is_success() {
             .await
             .map_err(|e| format!("Network error: {}", e))?;
 
+        let conn = init_db(&app)?;
         if push_res.status().is_success() {
-            let conn = init_db(&app)?;
             conn.execute("UPDATE interactions SET synced = 1 WHERE synced = 0", [])
                 .map_err(|e| e.to_string())?;
-            return Ok(format!("Synced {} records.", unsynced_data.len()));
+
+            if local_max_ts > new_watermark {
+                new_watermark = local_max_ts;
+            }
         }
     }
+    let conn = init_db(&app)?;
+    if new_watermark > last_sync_ts {
+        set_last_sync_ts(&conn, new_watermark)?;
+    }
 
-    Ok("Sync finished. No new data.".to_string())
+    Ok("Sync finished.".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

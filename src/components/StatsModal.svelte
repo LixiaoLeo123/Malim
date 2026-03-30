@@ -270,7 +270,7 @@
                         class="text-xs font-bold text-zinc-700 dark:text-zinc-200 leading-tight"
                         >Malim</span
                     >
-                    <span class="text-[10px] text-zinc-400">v0.5.0</span>
+                    <span class="text-[10px] text-zinc-400">v0.3.0</span>
                 </div>
             </div>
             <span class="text-[10px] text-zinc-400">by Drantiss</span>
