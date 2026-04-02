@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { slide, fly } from "svelte/transition";
+    import { slide, fly, fade } from "svelte/transition";
     import Flag from "./Flag.svelte";
     import StatsModal from "./StatsModal.svelte";
     import PromptGenerator from "./PromptGenerator.svelte";
@@ -14,7 +14,7 @@
         parsingQueue,
     } from "../lib/stores";
     import type { Article } from "../lib/types";
-    import { Plus, Trash2, Pencil, X, Sparkles, RefreshCw, BarChart2 } from "lucide-svelte";
+    import { Plus, Trash2, Pencil, X, Sparkles, RefreshCw, BarChart2, Settings2, CheckCircle2, AlertCircle } from "lucide-svelte";
     import ApiConfigModal from "./ApiConfigModel.svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { processQueue } from "$lib/parser";
@@ -35,17 +35,6 @@
     let deleteConfirmId: string | null = null;
     let pressTimer: number;
 
-    // onMount(() => {
-    //     articles.update((items) =>
-    //         items.map((item) => {
-    //             if (item.status === "parsing") {
-    //                 return { ...item, status: "error" as const };
-    //             }
-    //             return item;
-    //         })
-    //     );
-    // });
-
     function handleAdd() {
         activeArticleId.set(null);
         currentView.set("editor");
@@ -63,7 +52,7 @@
         pressTimer = window.setTimeout(() => {
             contextMenuTarget = id;
             deleteConfirmId = null;
-        }, 600);
+        }, 400); // Snappier interaction
     }
 
     function endPress() {
@@ -143,209 +132,220 @@
 </script>
 
 <div
-    class="flex flex-col h-full bg-zinc-50 border-r border-zinc-200 w-full md:w-80 bg-zinc-50 dark:bg-zinc-900 dark:border-zinc-800"
+    class="flex flex-col h-full bg-[#f9fafb] border-r border-zinc-200/60 w-full md:w-[320px] dark:bg-[#0f0f11] dark:border-zinc-800/60"
 >
     <div
-        class="p-4 border-b border-zinc-200 flex justify-between items-center bg-white dark:bg-zinc-950 dark:border-zinc-800 pt-[env(safe-area-inset-top)]"
+        class="px-5 py-4 flex justify-between items-center bg-transparent sticky top-0 z-20 pt-[calc(env(safe-area-inset-top)+1rem)]"
     >
-        <div class="font-bold text-xl tracking-tight dark:text-zinc-200">
+        <div class="font-bold text-2xl tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
+            <div class="w-6 h-6 bg-zinc-900 dark:bg-white rounded-md flex items-center justify-center">
+                <span class="text-white dark:text-zinc-900 text-[15px] font-black">말</span>
+            </div>
             Malim
         </div>
 
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1">
             {#if showSyncButton}
                 <button
                     on:click={handleSync}
                     disabled={syncStatus === 'syncing'}
-                    class="p-2 rounded-full transition duration-100 ease-out focus:outline-none
+                    class="p-2 rounded-xl transition-all duration-200 ease-out focus:outline-none
                         {syncStatus === 'syncing'
-                            ? 'bg-zinc-100 dark:bg-zinc-800 cursor-wait animate-spin'
+                            ? 'cursor-wait animate-spin text-zinc-400'
                             : syncStatus === 'success'
-                            ? 'text-emerald-500 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 dark:hover:bg-zinc-800'
+                            ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
                             : syncStatus === 'error'
-                            ? 'text-red-500 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 dark:hover:bg-zinc-800'
-                            : 'hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 dark:text-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700'}"
-                    title={syncStatus === 'syncing'
-                        ? 'Syncing...'
-                        : syncStatus === 'success'
-                        ? 'Sync Successful'
-                        : syncStatus === 'error'
-                        ? 'Sync Failed'
-                        : 'Sync Data'}
+                            ? 'text-red-500 bg-red-50 dark:bg-red-500/10'
+                            : 'text-zinc-500 hover:bg-zinc-200/50 hover:text-zinc-900 active:scale-95 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white'}"
                 >
-                    <RefreshCw size={20} />
+                    <RefreshCw size={18} strokeWidth={2.5} />
                 </button>
             {/if}
 
             <button
                 on:click={handleAdd}
-                class="p-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full transition duration-100 ease-out dark:text-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+                class="p-2 ml-1 text-white bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-xl transition-all duration-200 shadow-sm dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
                 title="New Article"
             >
-                <Plus size={20} />
+                <Plus size={18} strokeWidth={2.5} />
             </button>
         </div>
     </div>
 
     <div
-        class="flex-1 overflow-y-auto no-scrollbar p-2"
+        class="flex-1 overflow-y-auto no-scrollbar pb-6"
         on:scroll={handleListScroll}
     >
-        <div class="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-hidden divide-y divide-zinc-200 dark:divide-zinc-800">
+        <div class="px-4 py-2 grid grid-cols-2 gap-3 mb-4">
             <button
                 on:click={() => (showPromptGenerator = true)}
-                class="w-full flex items-center p-3 text-left transition-colors duration-100 ease-out hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+                class="flex flex-col items-start p-3.5 rounded-2xl border border-zinc-200/50 bg-white shadow-sm transition-all duration-200 hover:shadow-md hover:border-indigo-200 active:scale-[0.98] dark:bg-zinc-900/50 dark:border-zinc-800/50 dark:hover:border-indigo-500/30 group"
             >
-                <Sparkles class="text-zinc-500 dark:text-zinc-400" size={20} />
-                <span class="ml-3 font-medium text-sm text-zinc-700 dark:text-zinc-200">Generate Article Prompt</span>
+                <Sparkles size={20} class="text-indigo-500 dark:text-indigo-400 mb-2 group-hover:scale-110 transition-transform" />
+                <span class="font-semibold text-sm text-zinc-700 dark:text-zinc-200">AI Prompt</span>
             </button>
-            <button
-                on:click={handleAdd}
-                class="w-full flex items-center p-3 text-left transition-colors duration-100 ease-out hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
-            >
-                <Plus class="text-zinc-500 dark:text-zinc-400" size={20} />
-                <span class="ml-3 font-medium text-sm text-zinc-700 dark:text-zinc-200">New Article</span>
-            </button>
+            
             <button
                 on:click={() => (showStatsModal = true)}
-                class="w-full flex items-center p-3 text-left transition-colors duration-100 ease-out hover:bg-zinc-100 active:bg-zinc-200 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+                class="flex flex-col items-start p-3.5 rounded-2xl border border-zinc-200/50 bg-white shadow-sm transition-all duration-200 hover:shadow-md hover:border-orange-200 active:scale-[0.98] dark:bg-zinc-900/50 dark:border-zinc-800/50 dark:hover:border-orange-500/30 group"
             >
-                <BarChart2 class="text-zinc-500 dark:text-zinc-400" size={20} />
-                <span class="ml-3 font-medium text-sm text-zinc-700 dark:text-zinc-200">View Statistics</span>
+                <BarChart2 size={20} class="text-orange-500 dark:text-orange-400 mb-2 group-hover:scale-110 transition-transform" />
+                <span class="font-semibold text-sm text-zinc-700 dark:text-zinc-200">Statistics</span>
             </button>
         </div>
 
-        <hr class="border-zinc-200 dark:border-zinc-800 my-3"/>
-
-        <div class="space-y-2">
-            {#each visibleArticles as article (article.id)}
-                <div
-                    class="relative group rounded-xl bg-white border border-zinc-100 shadow-sm overflow-hidden select-none touch-manipulation hover:shadow-md active:scale-[0.98] active:bg-zinc-100 transition duration-100 ease-out dark:bg-zinc-950 dark:border-zinc-800 dark:hover:border-zinc-700 dark:active:bg-zinc-800"
-                    class:opacity-50={article.status === "parsing"}
-                    role="button"
-                    tabindex="0"
-                    on:click={() => {
-                        if (contextMenuTarget) return;
-                        openArticle(article);
-                    }}
-                    on:mousedown={() => article.status !== "parsing" && startPress(article.id)}
-                    on:mouseup={endPress}
-                    on:mouseleave={endPress}
-                    on:touchstart={() => article.status !== "parsing" && startPress(article.id)}
-                    on:touchend={endPress}
-                    on:keydown={(e) => e.key === "Enter" && openArticle(article)}
-                >
-                    <div class="p-4">
-                        <div class="flex justify-between items-start mb-1">
-                            <h3
-                                class="font-semibold text-zinc-800 truncate pr-2 leading-tight dark:text-zinc-100"
-                            >
-                                {article.title || "Untitled"}
-                            </h3>
-                            <div class="shrink-0">
-                                <Flag code={article.language} size={18} />
+        <div class="px-2">
+            <div class="px-3 text-[11px] font-bold tracking-widest text-zinc-400 dark:text-zinc-500 uppercase mb-2">
+                Your Library
+            </div>
+            
+            <div class="space-y-[2px]">
+                {#each visibleArticles as article (article.id)}
+                    <div
+                        class="relative group rounded-xl bg-transparent select-none touch-manipulation hover:bg-white dark:hover:bg-zinc-900 transition-all duration-150 ease-out active:scale-[0.99] active:bg-zinc-100 dark:active:bg-zinc-800"
+                        class:opacity-60={article.status === "parsing"}
+                        role="button"
+                        tabindex="0"
+                        on:click={() => {
+                            if (contextMenuTarget) return;
+                            openArticle(article);
+                        }}
+                        on:mousedown={() => article.status !== "parsing" && startPress(article.id)}
+                        on:mouseup={endPress}
+                        on:mouseleave={endPress}
+                        on:touchstart={() => article.status !== "parsing" && startPress(article.id)}
+                        on:touchend={endPress}
+                        on:keydown={(e) => e.key === "Enter" && openArticle(article)}
+                    >
+                        <div class="py-3 px-3 flex flex-col gap-1.5">
+                            <div class="flex justify-between items-start">
+                                <h3
+                                    class="font-medium text-zinc-900 truncate pr-3 text-[15px] dark:text-zinc-100"
+                                >
+                                    {article.title || "Untitled"}
+                                </h3>
+                                <div class="shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                                    <Flag code={article.language} size={16} />
+                                </div>
                             </div>
+
+                            {#if article.status === "parsing"}
+                                <div class="flex items-center gap-3">
+                                    <div class="flex-1 h-1 bg-zinc-200/60 rounded-full overflow-hidden dark:bg-zinc-800">
+                                        <div
+                                            class="h-full bg-indigo-500 transition-all duration-300"
+                                            style="width: {article.parsingProgress}%"
+                                        ></div>
+                                    </div>
+                                    <span class="text-[10px] font-bold text-indigo-500 uppercase tracking-wide animate-pulse">Parsing</span>
+                                </div>
+                            {:else if article.status === "error"}
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-1.5 text-red-500">
+                                        <AlertCircle size={12} strokeWidth={2.5}/>
+                                        <span class="text-xs font-medium">Parsing Failed</span>
+                                    </div>
+                                    <button
+                                        class="text-[11px] font-bold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-500/20 px-2 py-0.5 rounded transition-colors"
+                                        on:click|stopPropagation={() => retryArticle(article.id)}
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
+                            {:else}
+                                <p class="text-[13px] text-zinc-500 dark:text-zinc-400 line-clamp-1">
+                                    {article.preview}
+                                </p>
+                            {/if}
                         </div>
 
-                        {#if article.status === "parsing"}
+                        {#if contextMenuTarget === article.id}
                             <div
-                                class="h-1 w-full bg-zinc-100 mt-2 rounded-full overflow-hidden dark:bg-zinc-800"
-                            >
-                                <div
-                                    class="h-full bg-zinc-900 transition-all duration-300 dark:bg-zinc-200"
-                                    style="width: {article.parsingProgress}%"
-                                ></div>
-                            </div>
-                        {:else if article.status === "error"}
-                            <div class="flex items-center gap-2 mt-2">
-                                <div class="flex-1 h-1 w-full bg-zinc-100 rounded-full overflow-hidden dark:bg-zinc-800">
-                                    <div
-                                        class="h-full bg-red-500 dark:bg-red-400 transition-all duration-300"
-                                        style="width: {article.parsingProgress}%"
-                                    ></div>
-                                </div>
-                                <button
-                                    class="shrink-0 text-[10px] font-medium text-zinc-400 dark:text-zinc-500 hover:text-red-500 dark:hover:text-red-400 px-1.5 py-0.5 rounded transition-colors"
-                                    on:click|stopPropagation={() => retryArticle(article.id)}
-                                >
-                                    Retry
-                                </button>
-                            </div>
-                        {:else}
-                            <p class="text-sm text-zinc-500 line-clamp-2">
-                                {article.preview}
-                            </p>
-                        {/if}
-                    </div>
-
-                    {#if contextMenuTarget === article.id}
-                        <div
-                            transition:slide={{ axis: "y", duration: 200 }}
-                            class="bg-zinc-900 text-white p-2 flex items-center justify-around absolute inset-0 z-10"
-                        >
-                            <div
-                                class="relative flex items-center overflow-hidden h-full"
+                                in:fade={{ duration: 100 }}
+                                out:fade={{ duration: 100 }}
+                                class="absolute inset-0 z-10 bg-white/70 dark:bg-zinc-900/80 backdrop-blur-md rounded-xl p-1 flex items-center justify-center border border-zinc-200/50 dark:border-zinc-700/50"
                             >
                                 {#if deleteConfirmId === article.id}
-                                    <button
-                                        transition:fly={{ x: 20, duration: 200 }}
-                                        class="flex items-center space-x-2 bg-red-600 rounded-lg px-3 py-1 h-full cursor-pointer hover:bg-red-500"
-                                        on:click|stopPropagation={() =>
-                                            deleteArticle(article.id)}
-                                    >
-                                        <span class="text-sm font-bold"
-                                            >Confirm?</span
+                                    <div class="flex items-center gap-2" in:slide={{ axis: "x", duration: 200 }}>
+                                        <button
+                                            class="flex items-center gap-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors shadow-sm"
+                                            on:click|stopPropagation={() => deleteArticle(article.id)}
                                         >
-                                    </button>
+                                            <Trash2 size={14} /> Confirm
+                                        </button>
+                                        <button
+                                            class="p-1.5 text-zinc-500 hover:bg-zinc-200/50 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                                            on:click|stopPropagation={() => (deleteConfirmId = null)}
+                                        >
+                                            <X size={18} />
+                                        </button>
+                                    </div>
                                 {:else}
-                                    <button
-                                        on:click|stopPropagation={() =>
-                                            (deleteConfirmId = article.id)}
-                                        class="flex flex-col items-center justify-center w-16 hover:text-red-400 transition-colors"
-                                    >
-                                        <Trash2 size={18} />
-                                        <span class="text-[10px] mt-1">Delete</span>
-                                    </button>
+                                    <div class="flex items-center gap-1 bg-zinc-900 dark:bg-zinc-100 rounded-lg p-1 shadow-xl" in:fly={{ y: 5, duration: 150 }}>
+                                        <button
+                                            on:click|stopPropagation={() => (deleteConfirmId = article.id)}
+                                            class="flex items-center justify-center w-10 h-8 rounded-md text-red-400 hover:bg-red-500 hover:text-white transition-all"
+                                            title="Delete"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+
+                                        <div class="w-[1px] h-4 bg-zinc-700 dark:bg-zinc-300 mx-1"></div>
+
+                                        <button
+                                            on:click|stopPropagation={() => editArticle(article)}
+                                            class="flex items-center justify-center w-10 h-8 rounded-md text-zinc-300 dark:text-zinc-600 hover:bg-zinc-800 dark:hover:bg-zinc-200 hover:text-white dark:hover:text-zinc-900 transition-all"
+                                            title="Edit"
+                                        >
+                                            <Pencil size={16} />
+                                        </button>
+
+                                        <div class="w-[1px] h-4 bg-zinc-700 dark:bg-zinc-300 mx-1"></div>
+
+                                        <button
+                                            on:click|stopPropagation={() => (contextMenuTarget = null)}
+                                            class="flex items-center justify-center w-10 h-8 rounded-md text-zinc-400 hover:text-white dark:hover:text-zinc-900 transition-all"
+                                            title="Cancel"
+                                        >
+                                            <X size={18} />
+                                        </button>
+                                    </div>
                                 {/if}
                             </div>
-
-                            <button
-                                on:click|stopPropagation={() => editArticle(article)}
-                                class="flex flex-col items-center justify-center w-16 hover:text-blue-400 transition-colors"
-                            >
-                                <Pencil size={18} />
-                                <span class="text-[10px] mt-1">Edit</span>
-                            </button>
-
-                            <button
-                                on:click|stopPropagation={() =>
-                                    (contextMenuTarget = null)}
-                                class="flex flex-col items-center justify-center w-10 text-zinc-500 hover:text-white transition-colors"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
-                    {/if}
-                </div>
-            {/each}
+                        {/if}
+                    </div>
+                {/each}
+            </div>
         </div>
     </div>
 
     <div
-        class="p-3 border-t border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900"
+        class="border-t border-zinc-200/60 bg-[#f9fafb] dark:border-zinc-800/60 dark:bg-[#0f0f11] shrink-0"
     >
         <button
             type="button"
-            class="w-full flex items-center justify-center gap-2 px-3 py-2 bg-zinc-900 hover:bg-zinc-800 active:scale-[0.98] rounded-xl text-white text-sm font-medium shadow-lg transition duration-100 ease-out dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            class="w-full flex items-center justify-between px-5 py-3 hover:bg-zinc-200/30 dark:hover:bg-zinc-900 transition-colors group"
             on:click={() => (showApiConfig = true)}
         >
-            <span>
-                {$settings.apiKey && $settings.apiUrl && $settings.modelName
-                    ? "API configured ✓"
-                    : "Configure API"}
-            </span>
+            <div class="flex items-center gap-2">
+                <Settings2 size={16} class="text-zinc-400 group-hover:text-zinc-700 dark:group-hover:text-zinc-300 transition-colors" />
+                <span class="text-xs font-semibold text-zinc-500 group-hover:text-zinc-800 dark:text-zinc-400 dark:group-hover:text-zinc-200 transition-colors">
+                    API Settings
+                </span>
+            </div>
+            
+            {#if $settings.apiKey && $settings.apiUrl && $settings.modelName}
+                <div class="flex items-center gap-1 text-emerald-500">
+                    <CheckCircle2 size={14} />
+                    <span class="text-[10px] font-bold uppercase tracking-wider">Ready</span>
+                </div>
+            {:else}
+                <div class="flex items-center gap-1 text-amber-500">
+                    <AlertCircle size={14} />
+                    <span class="text-[10px] font-bold uppercase tracking-wider">Setup Needed</span>
+                </div>
+            {/if}
         </button>
-
         <ApiConfigModal bind:open={showApiConfig} />
     </div>
 </div>

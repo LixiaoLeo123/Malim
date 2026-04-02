@@ -27,6 +27,11 @@ use memory::{
 };
 use rusqlite::Connection;
 
+mod state;
+use state::AppState;
+
+mod scrapers;
+
 // ---prompts---
 const BASE_RULES: &str = r#"
 You are a precise JSON generator.
@@ -300,10 +305,6 @@ pub struct AiParsedResult {
 // struct SentenceSplitResult {
 //     sentences: Vec<String>,
 // }
-
-struct AppState {
-    // sentence_cache: Mutex<HashMap<String, Vec<WordBlock>>>,
-}
 
 #[derive(Serialize)]
 struct TtsRequest {
@@ -1557,7 +1558,12 @@ async fn sync_memory(
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
-            // sentence_cache: Mutex::new(HashMap::new()),
+            http_client: reqwest::Client::builder()
+                .user_agent("LangLearnBot/1.0")
+                .build()
+                .unwrap(),
+            scrapers_by_lang: scrapers::registry::get_scrapers_by_language(),
+            emitted_urls: std::sync::Mutex::new(std::collections::HashSet::new()),
         })
         .plugin(tauri_plugin_media_toolkit::init())
         .invoke_handler(tauri::generate_handler![

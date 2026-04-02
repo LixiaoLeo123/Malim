@@ -183,7 +183,7 @@ Requirements:
                     <span
                         class="text-sm font-bold text-zinc-700 dark:text-zinc-300"
                     >
-                        {newWordRatio}% ({totalNewWords} words)
+                        {newWordRatio}% ({Math.round(newWordRatio * totalNewWords / 100)} words)
                     </span>
                 </div>
                 <input
