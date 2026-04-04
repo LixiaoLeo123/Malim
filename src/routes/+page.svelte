@@ -2,6 +2,8 @@
     import Sidebar from "../components/Sidebar.svelte";
     import Editor from "../components/Editor.svelte";
     import Reader from "../components/Reader.svelte";
+    import Discover from "../components/Discover.svelte";
+    import Chat from "../components/Chat.svelte";
     import { currentView, isSidebarOpen } from "../lib/stores";
     import { fade, fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
@@ -79,6 +81,10 @@
             <Editor />
         {:else if $currentView === "reader"}
             <Reader />
+        {:else if $currentView === "discover"}
+            <Discover />
+        {:else if $currentView === "chat"}
+            <Chat />
         {/if}
     </div>
 </main>

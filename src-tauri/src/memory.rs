@@ -1,17 +1,16 @@
 // support Russian only
 
 use rand::seq::SliceRandom;
+use rsmorphy::opencorpora::Dictionary;
+use rsmorphy::MorphAnalyzer;
+use rsmorphy::Source;
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use unicode_normalization::UnicodeNormalization;
-use rsmorphy::MorphAnalyzer;
-use std::sync::OnceLock;
-use rsmorphy::opencorpora::Dictionary;
-use rsmorphy::Source;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
-static MORPH: OnceLock<MorphAnalyzer> = OnceLock::new();
 const DEFAULT_S0: f64 = 0.05;
 
 // #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -657,38 +656,44 @@ pub async fn get_words_in_p_range(
 }
 
 
-
-
-pub fn init_morph() -> Result<MorphAnalyzer, String> {
-    let dict_path = rsmorphy_dict_ru::DICT_PATH;
-    let dict = Dictionary::from_file(dict_path);
-    Ok(MorphAnalyzer::new(dict))
-}
-
 pub fn analyze_text(app: AppHandle, text: &str) -> Vec<(String, Option<f64>)> {
-    let morph = init_morph().ok();
+    let morph = Some({
+        let dict_path = rsmorphy_dict_ru::DICT_PATH;
+        let dict = Dictionary::from_file(dict_path);
+        MorphAnalyzer::new(dict)
+    });
     let conn = init_db(&app).ok();
-    
+
     let now = chrono::Local::now().timestamp();
     let mut results = Vec::new();
 
-    for word in text.split_whitespace() {
-        let clean_word: String = word
+    for original_token in text.split_whitespace() {
+        let clean_word: String = original_token
             .chars()
             .filter(|c| c.is_alphabetic() || *c == '-')
             .collect::<String>()
             .to_lowercase();
+        
+        let p = if clean_word.is_empty() {
+            None
+        } else if let (Some(m), Some(c)) = (&morph, &conn) {
+            let parse_result = catch_unwind(AssertUnwindSafe(|| {
+                m.parse(&clean_word)
+            }));
 
-        if clean_word.is_empty() {
-            continue;
-        }
-
-        let p = if let (Some(m), Some(c)) = (&morph, &conn) {
-            let lemma = match m.parse(&clean_word).first() {
-                Some(p) => p.lex.get_lemma(m).to_string(),
-                None => clean_word.clone(),
+            let lemma = match parse_result {
+                Ok(parsed_vec) => {
+                    match parsed_vec.first() {
+                        Some(p) => p.lex.get_lemma(m).to_string(),
+                        None => clean_word.clone(),
+                    }
+                }
+                Err(_) => {
+                    clean_word.clone()
+                }
             };
-
+            // dbg!(&lemma);
+            // dbg!(&original_token);
             let (current_s, last_ts): (f64, i64) = c
                 .query_row(
                     "SELECT current_s, last_ts FROM word_stats WHERE lemma = ?1",
@@ -707,7 +712,7 @@ pub fn analyze_text(app: AppHandle, text: &str) -> Vec<(String, Option<f64>)> {
             None
         };
 
-        results.push((clean_word, p));
+        results.push((original_token.to_string(), p));
     }
 
     results

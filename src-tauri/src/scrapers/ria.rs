@@ -85,7 +85,7 @@ impl RiaScraper {
         }
 
         if title.is_empty() || content.trim().is_empty() {
-            return Err("RIA: 解析失败".into());
+            return Err("Failed to parse".into());
         }
 
         Ok(Article {
@@ -97,6 +97,8 @@ impl RiaScraper {
             cover_image: cover,
             content: content.trim().to_string(),
             words: None,
+            difficulty: None,
+            recommendation: None,
         })
     }
 }

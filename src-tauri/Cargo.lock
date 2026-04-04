@@ -2655,8 +2655,10 @@ dependencies = [
  "msedge-tts",
  "openssl-sys",
  "rand 0.8.5",
+ "regex",
  "reqwest 0.12.28",
  "rodio",
+ "roxmltree",
  "rsmorphy",
  "rsmorphy-dict-ru",
  "rusqlite",
@@ -4342,6 +4344,15 @@ name = "roman"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2c543f0c827ae24df93159810fd4bce2d0abe3785bb4c4d68fae3c467d58d9b"
+
+[[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "rsmorphy"

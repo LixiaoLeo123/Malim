@@ -31,6 +31,7 @@ mod state;
 use state::AppState;
 
 mod scrapers;
+use scrapers::commands::{get_sources_by_language, get_feed, clear_emitted_urls};
 
 // ---prompts---
 const BASE_RULES: &str = r#"
@@ -1579,7 +1580,10 @@ pub fn run() {
             get_daily_reading,
             get_reading_by_date,
             get_alpha,
-            sync_memory
+            sync_memory,
+            get_sources_by_language, 
+            get_feed,
+            clear_emitted_urls
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

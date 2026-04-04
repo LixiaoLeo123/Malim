@@ -2,7 +2,7 @@ import { writable } from 'svelte/store';
 import type { Article, Draft, Settings } from './types';
 import { invoke } from '@tauri-apps/api/core'
 import { get } from 'svelte/store'
-export const currentView = writable<'home' | 'editor' | 'reader'>('home');
+export const currentView = writable<'home' | 'editor' | 'reader' | 'discover' | 'chat'>('home');
 
 export const isSidebarOpen = writable<boolean>(false);
 
