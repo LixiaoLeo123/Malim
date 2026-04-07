@@ -39,22 +39,43 @@ export interface Draft {
     language: string;
 }
 
+export interface AiConfig {
+  id: string;
+  name: string;
+  apiKey: string;
+  apiUrl: string;
+  modelName: string;
+}
+
+export interface ProactiveEvent {
+  time: string;
+  message: string;
+}
+
+
 export interface Settings {
-    apiKey: string;
-    apiUrl: string;
-    modelName: string;
-    concurrency: number;
-    autoSpeak: boolean;
-    preCacheAudio: boolean;
-    ttsConcurrency: number;
-    ttsApi: "edge-tts" | "qwen3-tts" | "silero-tts";
-    qwenApiKey: string;
-    qwenVoice: string;
-    sileroUrl: string;
-    ruaccentEnabled: boolean;
-    ruaccentUrl: string;
-    syncEnabled: boolean;
-    syncServerUrl: string;
-    userId: string; // for sync identification
-    memoryModelEnabled: boolean;
+  aiConfigList: AiConfig[];
+  defaultAiConfigId: string; // Default (Article Parsing)
+  mainAiConfigId: string;    // Main Chat AI
+  shadowAiConfigId: string;  // Shadow AI (Memory)
+  embedAiConfigId: string;   // Embedding Model (RAG)
+  grammarAiConfigId: string; // Grammar Correction AI
+
+  concurrency: number;
+  autoSpeak: boolean;
+  preCacheAudio: boolean;
+  ttsConcurrency: number;
+  ttsApi: "edge-tts" | "qwen3-tts" | "silero-tts";
+  qwenApiKey: string;
+  qwenVoice: string;
+  sileroUrl: string;
+  ruaccentEnabled: boolean;
+  ruaccentUrl: string;
+  syncEnabled: boolean;
+  syncServerUrl: string;
+  userId: string; 
+  memoryModelEnabled: boolean;
+  userAvatarUrl: string;
+  aiAvatarUrl: string;
+  proactiveEvent: ProactiveEvent | null;
 }

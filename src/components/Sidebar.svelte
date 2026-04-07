@@ -159,10 +159,10 @@
         class="px-5 py-4 flex justify-between items-center bg-transparent sticky top-0 z-20 pt-[calc(env(safe-area-inset-top)+1rem)]"
     >
         <div
-            class="font-bold text-2xl tracking-tight text-zinc-900 dark:text-white flex items-center gap-2"
+            class="font-bold text-2xl leading-none tracking-tight text-zinc-900 dark:text-white flex items-center gap-2"
         >
             <div
-                class="w-6 h-6 bg-zinc-900 dark:bg-white rounded-md flex items-center justify-center"
+                class="w-6 h-6 bg-zinc-900 dark:bg-white rounded-md flex items-center justify-center flex-shrink-0"
             >
                 <span
                     class="text-white dark:text-zinc-900 text-[15px] font-black"
@@ -445,7 +445,7 @@
                 </span>
             </div>
 
-            {#if $settings.apiKey && $settings.apiUrl && $settings.modelName}
+            {#if $settings.defaultAiConfigId && $settings.embedAiConfigId && $settings.grammarAiConfigId && $settings.shadowAiConfigId && $settings.mainAiConfigId}
                 <div class="flex items-center gap-1 text-emerald-500">
                     <CheckCircle2 size={14} />
                     <span class="text-[10px] font-bold uppercase tracking-wider"

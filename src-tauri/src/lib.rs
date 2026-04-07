@@ -31,7 +31,16 @@ mod state;
 use state::AppState;
 
 mod scrapers;
-use scrapers::commands::{get_sources_by_language, get_feed, clear_emitted_urls};
+use scrapers::commands::{clear_emitted_urls, get_feed, get_sources_by_language};
+
+mod chat;
+use chat::commands::{send_message, trigger_proactive, get_chat_logs, save_grammar_corrections};
+
+mod translation;
+use translation::commands::translate;
+
+mod grammar_correction;
+use grammar_correction::commands::check_grammar;
 
 // ---prompts---
 const BASE_RULES: &str = r#"
@@ -922,7 +931,7 @@ async fn call_ai_api(
             {"role": "system", "content": "You are a helpful assistant that outputs only JSON."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.1,
+        "temperature": 0,
         "stream": false,
         "max_tokens": 8196,
         "enable_thinking": false
@@ -1558,13 +1567,44 @@ async fn sync_memory(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState {
-            http_client: reqwest::Client::builder()
-                .user_agent("LangLearnBot/1.0")
-                .build()
-                .unwrap(),
-            scrapers_by_lang: scrapers::registry::get_scrapers_by_language(),
-            emitted_urls: std::sync::Mutex::new(std::collections::HashSet::new()),
+        // .manage(AppState {
+        //     http_client: reqwest::Client::builder()
+        //         .user_agent("LangLearnBot/1.0")
+        //         .build()
+        //         .unwrap(),
+        //     scrapers_by_lang: scrapers::registry::get_scrapers_by_language(),
+        //     emitted_urls: std::sync::Mutex::new(std::collections::HashSet::new()),
+        //     memory_handler: Mutex::new(
+        //         MemoryHandler::new(&db_path).expect("Failed to initialize memory handler"),
+        //     ),
+        // })
+        .setup(|app| {
+            let db_path = app.path().app_data_dir().unwrap().join("chat.db");
+            let db_path = db_path.to_str().expect("Invalid DB path");
+
+            let handler =
+                chat::MemoryHandler::new(&db_path).expect("Failed to initialize memory handler");
+
+            app.manage(AppState {
+                http_client: reqwest::Client::builder()
+                    .user_agent("LangLearnBot/1.0")
+                    .build()
+                    .unwrap(),
+                scrapers_by_lang: scrapers::registry::get_scrapers_by_language(),
+                emitted_urls: std::sync::Mutex::new(std::collections::HashSet::new()),
+                memory_handler: handler,
+                translator: {
+                    match translation::Translator::new() {
+                        Ok(t) => Some(std::sync::Mutex::new(t)),
+                        Err(e) => {
+                            dbg!("Failed to initialize translator: {}", e);
+                            None
+                        }
+                    }
+                }
+            });
+
+            Ok(())
         })
         .plugin(tauri_plugin_media_toolkit::init())
         .invoke_handler(tauri::generate_handler![
@@ -1581,9 +1621,15 @@ pub fn run() {
             get_reading_by_date,
             get_alpha,
             sync_memory,
-            get_sources_by_language, 
+            get_sources_by_language,
             get_feed,
-            clear_emitted_urls
+            clear_emitted_urls,
+            send_message, 
+            trigger_proactive,
+            translate,
+            check_grammar,
+            get_chat_logs,
+            save_grammar_corrections
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

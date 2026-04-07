@@ -172,7 +172,6 @@
       };
       const newArticles: Article[] = await invoke("get_feed", { req });
 
-      // 修改：仅在获取新数据时计算一次阈值，并一次性生成固化好的 class
       layoutThresholds = calculateThresholds(newArticles);
       const newClasses = newArticles.map((a) => getTileSpanClass(a));
 

@@ -28,25 +28,39 @@ export const editorDraft = writable<Draft>({
     language: 'KR'
 });
 
+
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+}
+
 export const settings = writable<Settings>({
-    apiKey: '',
-    apiUrl: '',
-    modelName: '',
-    concurrency: 1,
-    autoSpeak: false,
-    preCacheAudio: true,
-    ttsConcurrency: 1,
-    ttsApi: "edge-tts",
-    qwenApiKey: '',
-    qwenVoice: '',
-    sileroUrl: '',
-    ruaccentEnabled: false,
-    ruaccentUrl: '',
-    syncEnabled: false,
-    syncServerUrl: '',
-    userId: '',
-    memoryModelEnabled: true,
-})
+  aiConfigList: [],
+  
+  defaultAiConfigId: '',
+  mainAiConfigId: '',
+  shadowAiConfigId: '',
+  embedAiConfigId: '',
+  grammarAiConfigId: '',
+
+  concurrency: 1,
+  autoSpeak: false,
+  preCacheAudio: true,
+  ttsConcurrency: 1,
+  ttsApi: "edge-tts",
+  qwenApiKey: '',
+  qwenVoice: '',
+  sileroUrl: '',
+  ruaccentEnabled: false,
+  ruaccentUrl: '',
+  syncEnabled: false,
+  syncServerUrl: '',
+  userId: '',
+  memoryModelEnabled: true,
+  userAvatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=User' ,
+  aiAvatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Malim' ,
+  proactiveEvent: null,
+});
 
 export const parsingQueue = writable<string[]>([]); // article id
 export const isProcessingQueue = writable(false);

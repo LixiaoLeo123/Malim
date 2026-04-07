@@ -2,13 +2,18 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use crate::scrapers::{NewsScraper, SourceInfo};
-
+use crate::chat::MemoryHandler;
+use crate::translation::Translator;
 pub struct AppState {
     pub http_client: reqwest::Client,
 
     pub scrapers_by_lang: HashMap<String, Vec<Box<dyn NewsScraper>>>,
 
     pub emitted_urls: Mutex<HashSet<String>>,
+ 
+    pub memory_handler: MemoryHandler,
+
+    pub translator: Option<Mutex<Translator>>,
 }
 
 impl AppState {

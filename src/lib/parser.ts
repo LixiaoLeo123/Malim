@@ -8,19 +8,20 @@ import {
     isProcessingQueue,
     settings,
 } from "./stores";
+import { notifications } from '../lib/notificationStore';
 
 export async function processQueue() {
     const isProcessing = get(isProcessingQueue);
     const queue = get(parsingQueue);
-    
+
     if (isProcessing || queue.length === 0) return;
-    
+
     isProcessingQueue.set(true);
-    
+
     const currentId = queue[0];
     const currentArticles = get(articles);
     const currentArticle = currentArticles.find((a) => a.id === currentId);
-    
+
     if (!currentArticle || !currentArticle.draftContent) {
         parsingQueue.update((q) => q.slice(1));
         isProcessingQueue.set(false);
@@ -45,13 +46,22 @@ export async function processQueue() {
     });
 
     try {
+        function getConfigById(id: string | undefined) {
+            if (!id) return undefined;
+            return currentSettings.aiConfigList.find((c) => c.id === id);
+        }
+        const defaultConfig = getConfigById(currentSettings.defaultAiConfigId);
+        if (!defaultConfig) {
+            notifications.error("Please configure your API first.");
+            throw new Error("Default AI configuration not found");
+        }
         const result: any = await invoke("parse_text", {
             id: currentId,
             text: currentArticle.draftContent,
             language: currentArticle.language,
-            apiKey: currentSettings.apiKey,
-            apiUrl: currentSettings.apiUrl,
-            modelName: currentSettings.modelName,
+            apiKey: defaultConfig.apiKey,
+            apiUrl: defaultConfig.apiUrl,
+            modelName: defaultConfig.modelName,
             concurrency: currentSettings.concurrency,
             ttsConcurrency: currentSettings.ttsConcurrency,
             preCacheAudio: currentSettings.preCacheAudio,

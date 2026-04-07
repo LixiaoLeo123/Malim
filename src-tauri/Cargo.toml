@@ -44,3 +44,7 @@ rsmorphy = "0.4.0"
 rsmorphy-dict-ru = "0.1"
 roxmltree = "0.21"
 regex = "1.12.3"
+tiktoken-rs = "0.5.8"
+ort = { version = "2.0.0-rc.12", features = ["tls-rustls"] }
+tokenizers = "0.15.2"
+anyhow = "1.0"

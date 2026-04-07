@@ -14,6 +14,7 @@
     import type { Article } from "../lib/types";
     import { processQueue } from "../lib/parser";
     import { onDestroy } from "svelte";
+    import { notifications } from '../lib/notificationStore';
 
     let showLangSelector = false;
     let wordCount = 0;
@@ -35,8 +36,8 @@
 
         if (!contentSnapshot.trim()) return;
 
-        if (!$settings.apiKey) {
-            alert("Please configure your API first.");
+        if (!$settings.defaultAiConfigId) {
+            notifications.warning("Please configure your API first.");
             return;
         }
 
