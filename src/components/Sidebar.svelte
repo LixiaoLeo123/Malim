@@ -597,7 +597,7 @@
                 <div class="flex items-center text-amber-500">
                     <AlertCircle size={14} class="mr-1" />
                     <span class="text-[10px] font-bold uppercase tracking-wider"
-                        >Setup</span
+                        >Setup needed</span
                     >
                 </div>
             {/if}

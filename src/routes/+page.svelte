@@ -77,7 +77,7 @@
     });
 </script>
 
-<main class="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 pt-[env(safe-area-inset-top)]">
+<main class="flex h-screen w-screen overflow-hidden {$currentView === 'chat' ? 'bg-[#f7f7f7] dark:bg-[#1b1a1b]' : 'bg-white dark:bg-zinc-950'} text-zinc-900 dark:text-zinc-100 pt-[env(safe-area-inset-top)] transition-colors duration-300">
     <div class="hidden md:block h-full w-80 shrink-0 z-20 border-r border-zinc-200 dark:border-zinc-800">
         <Sidebar />
     </div>

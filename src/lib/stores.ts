@@ -105,6 +105,8 @@ async function save() {
 }
 
 (async () => {
+    // Delay to allow Android Tauri IPC bridge to fully initialize
+    await new Promise(resolve => setTimeout(resolve, 1000));
     await load();
     articles.subscribe(save);
     editorDraft.subscribe(save);

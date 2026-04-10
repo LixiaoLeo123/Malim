@@ -523,7 +523,7 @@ pub async fn record_unparsed_text_words(app: AppHandle, text: String) -> Result<
     tokio::task::spawn_blocking(move || {
         let mut conn = init_db(&app)?;
         let morph = {
-            let dict_path = rsmorphy_dict_ru::DICT_PATH;
+            let dict_path = crate::memory::ensure_dict_files(&app);
             let dict = Dictionary::from_file(dict_path);
             MorphAnalyzer::new(dict)
         };
@@ -719,10 +719,46 @@ pub async fn get_words_in_p_range(
 }
 
 
+
+pub fn ensure_dict_files(app: &tauri::AppHandle) -> String {
+    use tauri::Manager;
+    let app_data = app.path().app_data_dir().expect("Failed to get app_data_dir");
+    let out_dir = app_data.join("rsmorphy_data");
+    
+    if !out_dir.join("meta.json.gz").exists() {
+        std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
+            eprintln!("Failed to create rsmorphy_data dir: {}", e);
+        });
+        
+        macro_rules! dump {
+            ($file:expr) => {
+                if let Err(e) = std::fs::write(out_dir.join($file), include_bytes!(concat!("../rsmorphy_data/", $file))) {
+                    eprintln!("Failed to write rsmorphy dict {}: {}", $file, e);
+                }
+            };
+        }
+        
+        dump!("grammemes.json.gz");
+        dump!("gramtab-opencorpora-ext.json.gz");
+        dump!("gramtab-opencorpora-int.json.gz");
+        dump!("meta.json.gz");
+        dump!("paradigms.array.gz");
+        dump!("prediction-prefixes.dawg.gz");
+        dump!("prediction-suffixes-0.dawg.gz");
+        dump!("prediction-suffixes-1.dawg.gz");
+        dump!("prediction-suffixes-2.dawg.gz");
+        dump!("p_t_given_w.intdawg.gz");
+        dump!("suffixes.json.gz");
+        dump!("words.dawg.gz");
+    }
+    
+    out_dir.to_string_lossy().to_string()
+}
+
 pub fn analyze_text(app: AppHandle, text: &str) -> Vec<(String, Option<f64>)> {
     let morph = Some({
-        let dict_path = rsmorphy_dict_ru::DICT_PATH;
-        let dict = Dictionary::from_file(dict_path);
+        let dict_path = ensure_dict_files(&app);
+        let dict = Dictionary::from_file(&dict_path);
         MorphAnalyzer::new(dict)
     });
     let conn = init_db(&app).ok();

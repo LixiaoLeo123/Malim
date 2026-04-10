@@ -47,6 +47,7 @@
     let articles: Article[] = [];
     let layoutClasses: string[] = [];
     let isLoading = false;
+    let isLoadingSources = false;
     let isResetting = false;
     let selectedArticle: Article | null = null;
     let feedContainer: HTMLDivElement;
@@ -148,6 +149,8 @@
     }
 
     async function loadSources() {
+        if (isLoadingSources) return;
+        isLoadingSources = true;
         try {
             sources = await invoke("get_sources_by_language", {
                 lang: currentLang,
@@ -158,6 +161,8 @@
             }
         } catch (error) {
             console.error("Failed to load sources:", error);
+        } finally {
+            isLoadingSources = false;
         }
     }
 
@@ -185,7 +190,7 @@
             const req = {
                 lang: currentLang,
                 selected_source_ids: Array.from(selectedSourceIds),
-                limit: 15,
+                limit: 6,
                 mark_familiarity: markFamiliarity,
             };
             const newArticles: Article[] = await invoke("get_feed", { req });
@@ -201,6 +206,7 @@
             }
         } catch (error) {
             console.error("Failed to fetch feed:", error);
+            notifications.error(error instanceof Error ? error.message : "Failed to fetch feed");
             fetchTriggered = false;
         } finally {
             isLoading = false;
@@ -317,6 +323,10 @@
     onMount(() => {
         loadSources();
     });
+
+    $: if ($currentView === "discover" && sources.length === 0 && !isLoadingSources) {
+        loadSources();
+    }
 </script>
 
 <div class="flex flex-col h-full bg-white relative dark:bg-zinc-950 overflow-hidden">

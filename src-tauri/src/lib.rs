@@ -48,6 +48,7 @@ mod saves;
 use saves::{check_import_file, create_export_temp_file, execute_import, get_backup_definitions};
 
 mod brain;
+mod resolver;
 use brain::get_brain_words;
 
 
@@ -1453,6 +1454,7 @@ pub fn run() {
             app.manage(AppState {
                 http_client: reqwest::Client::builder()
                     .user_agent("LangLearnBot/1.0")
+                    .dns_resolver(std::sync::Arc::new(resolver::CustomHickoryResolver::default()))
                     .build()
                     .unwrap(),
                 scrapers_by_lang: scrapers::registry::get_scrapers_by_language(),
