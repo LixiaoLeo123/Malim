@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
     import {
         articles,
         activeArticleId,
@@ -22,7 +22,6 @@
 
     $: article = $articles.find((a) => a.id === $activeArticleId) as any;
 
-    let containerEl: HTMLElement | null = null;
     let lastClickedBlock: Block | null = null;
     let activeBlock: Block | null = null;
     let activeBlockEl: HTMLElement | null = null;
@@ -301,7 +300,6 @@
             });
 
             frame++;
-            
             animationFrameId = requestAnimationFrame(animate);
         }
         animate();
@@ -312,17 +310,15 @@
         const rect = activeBlockEl.getBoundingClientRect();
         const viewportW = document.documentElement.clientWidth || window.innerWidth;
         const viewportH = document.documentElement.clientHeight || window.innerHeight;
-        const containerRect = containerEl ? containerEl.getBoundingClientRect() : { left: 0, top: 0, right: viewportW };
         const popoverWidth = 300;
         const arrowSize = 8;
 
         const blockCenter = rect.left + rect.width / 2;
 
         let popoverLeft = blockCenter - popoverWidth / 2;
-        if (popoverLeft + popoverWidth > (containerRect.right || viewportW) - 20)
-            popoverLeft = (containerRect.right || viewportW) - popoverWidth - 20;
-        if (popoverLeft < containerRect.left + 10) 
-            popoverLeft = containerRect.left + 10;
+        if (popoverLeft + popoverWidth > viewportW - 20)
+            popoverLeft = viewportW - popoverWidth - 20;
+        if (popoverLeft < 10) popoverLeft = 10;
 
         let arrowLeft = blockCenter - popoverLeft - arrowSize;
         arrowLeft = Math.max(8, Math.min(popoverWidth - 24, arrowLeft));
@@ -331,8 +327,8 @@
         const showOnTop = spaceBelow < 250;
 
         popoverPosition = {
-            left: popoverLeft - containerRect.left,
-            top: (showOnTop ? rect.top - 10 : rect.bottom + 10) - containerRect.top,
+            left: popoverLeft,
+            top: showOnTop ? rect.top - 10 : rect.bottom + 10,
             align: showOnTop ? "top" : "bottom",
             arrowLeft: arrowLeft,
         };
@@ -362,7 +358,7 @@
 
 <svelte:window on:click={handleGlobalClick} />
 
-<div class="flex flex-col h-full bg-white relative dark:bg-zinc-950" bind:this={containerEl}>
+<div class="flex flex-col h-full bg-white relative dark:bg-zinc-950">
     <div
         class="h-14 border-b border-zinc-100 flex items-center justify-between px-4 sticky top-0 bg-white/95 backdrop-blur z-30 dark:border-zinc-800 dark:bg-zinc-950/95"
     >

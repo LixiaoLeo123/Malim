@@ -560,6 +560,35 @@
                 </button>
             </div>
 
+            <label class="block mt-3 mb-4">
+                <span
+                    class="block text-sm font-medium text-zinc-600 mb-1 dark:text-zinc-300"
+                >
+                    Concurrency
+                </span>
+                <input
+                    type="number"
+                    bind:value={tempConcurrency}
+                    min={1}
+                    max={50}
+                    step={1}
+                    class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
+                    style="appearance: textfield; -moz-appearance: textfield;"
+                />
+                <style>
+                    input[type="number"]::-webkit-inner-spin-button,
+                    input[type="number"]::-webkit-outer-spin-button {
+                        -webkit-appearance: none;
+                        margin: 0;
+                    }
+                    input[type="number"]::-moz-inner-spin-button,
+                    input[type="number"]::-moz-outer-spin-button {
+                        -moz-appearance: none;
+                        margin: 0;
+                    }
+                </style>
+            </label>
+
             <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
 
             <div class="flex items-center justify-between mt-3 mb-2">

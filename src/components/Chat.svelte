@@ -71,6 +71,7 @@
 	let isLoadingHistory = false;
 	let hasMoreHistory = true;
 	let firstLoad = true;
+	let containerEl: HTMLElement | null = null;
 
 	let activeParsedBlock: Block | null = null;
 	let activeParsedBlockEl: HTMLElement | null = null;
@@ -118,6 +119,9 @@
 		target: HTMLElement,
 	) {
 		const rect = target.getBoundingClientRect();
+		const containerRect = containerEl
+			? containerEl.getBoundingClientRect()
+			: { left: 0, top: 0 };
 		let pos: "top" | "bottom" = "top";
 		let targetY = rect.top - 12;
 		if (targetY < 80) {
@@ -126,8 +130,8 @@
 		}
 		contextMenu = {
 			visible: true,
-			x: clientX,
-			y: targetY,
+			x: clientX - containerRect.left,
+			y: targetY - containerRect.top,
 			msgId,
 			position: pos,
 		};
@@ -301,21 +305,24 @@
 	function calcPopoverPos() {
 		if (!activeParsedBlockEl) return;
 		const rect = activeParsedBlockEl.getBoundingClientRect();
+                const containerRect = containerEl ? containerEl.getBoundingClientRect() : { left: 0, top: 0 };
+		const pw = 264;
 		const sw = window.innerWidth;
 		const sh = window.innerHeight;
-		const pw = 264;
 		const as = 7;
-		let pl = rect.left;
+		
+		const bc = rect.left + rect.width / 2;
+		let pl = bc - pw / 2;
 		if (pl + pw > sw - 12) pl = sw - pw - 12;
 		if (pl < 8) pl = 8;
-		const bc = rect.left + rect.width / 2;
+		
 		let al = bc - pl - as;
 		al = Math.max(8, Math.min(pw - 20, al));
 		const below = sh - rect.bottom;
 		const top = below < 200;
 		popoverPos = {
-			left: pl,
-			top: top ? rect.top - 10 : rect.bottom + 10,
+			left: pl - containerRect.left,
+			top: (top ? rect.top - 10 : rect.bottom + 10) - containerRect.top,
 			align: top ? "top" : "bottom",
 			arrowLeft: al,
 		};
@@ -759,6 +766,7 @@
 />
 
 <div
+	bind:this={containerEl}
 	class="app-container"
 	style="--chat-bg-image: {backgroundUrl ? `url(${backgroundUrl})` : 'none'}"
 >
@@ -1839,7 +1847,7 @@
 
 	/* ---------- Context menu ---------- */
 	.context-menu {
-		position: fixed;
+		position: absolute;
 		background-color: var(--context-bg);
 		border-radius: 8px;
 		display: flex;

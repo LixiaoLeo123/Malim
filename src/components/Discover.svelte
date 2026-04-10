@@ -52,7 +52,6 @@
     let selectedArticle: Article | null = null;
     let feedContainer: HTMLDivElement;
 
-    let reachedBottom = false;
     let fetchTriggered = false;
     let touchStartY = 0;
 
@@ -218,21 +217,30 @@
     }
 
 
+    function isNearBottom() {
+        if (!feedContainer) return false;
+        return (
+            feedContainer.scrollHeight -
+                feedContainer.scrollTop -
+                feedContainer.clientHeight <
+            40
+        );
+    }
+
     function handleScroll() {
-        if (!feedContainer) return;
-        const isAtBottom =
-            feedContainer.scrollHeight - feedContainer.scrollTop - feedContainer.clientHeight < 5;
-        
-        if (isAtBottom) {
-            reachedBottom = true;
+        if (isNearBottom()) {
+            triggerFetch();
         } else {
-            reachedBottom = false;
             fetchTriggered = false;
         }
     }
 
     function triggerFetch() {
-        if (reachedBottom && !fetchTriggered && !isLoading && selectedSourceIds.size > 0) {
+        if (!isNearBottom()) {
+            fetchTriggered = false;
+            return;
+        }
+        if (!fetchTriggered && !isLoading && selectedSourceIds.size > 0) {
             fetchTriggered = true;
             fetchFeed(true);
         }
