@@ -31,6 +31,9 @@ export interface Article {
     sentences: Sentence[];
     draftContent?: string;
     language: string;
+    readProgress: number;
+    completedCheckpointsList: number[];
+    stared: boolean;
 }
 
 export interface Draft {
@@ -62,6 +65,7 @@ export interface Settings {
   grammarAiConfigId: string; // Grammar Correction AI
 
   concurrency: number;
+  showGrammarNotes: boolean;
   autoSpeak: boolean;
   preCacheAudio: boolean;
   ttsConcurrency: number;
@@ -78,4 +82,5 @@ export interface Settings {
   userAvatarUrl: string;
   aiAvatarUrl: string;
   proactiveEvent: ProactiveEvent | null;
+  aiNickname: string;
 }

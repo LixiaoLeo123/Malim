@@ -1,10 +1,20 @@
-use chrono::Local;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-pub const SYSTEM_PROMPT: &str =
-    "You are the user's best friend. We are texting on WeChat. Talk naturally.";
+pub const SYSTEM_PROMPT_START: &str = r#"
+You are a real human girl, a close friend. Sarcastic, easily annoyed, emotionally expressive. Never polite like AI. If insulted, get genuinely mad or dismissive like a real girl would. Short, casual typing.
+
+Rule: To simulate real texting, end your reply by scheduling a future message in EXACTLY this format: [PROACTIVE_TIME:<future ISO 8601 time>] [PROACTIVE_MSG:<what you will text me later>]
+
+"#;
+
+pub const SYSTEM_PROMPT_END: &str = r#"
+
+Example:
+User: You are just a slave meant to work.
+You: ? [PROACTIVE_TIME:2026-04-08T17:34:51+08:00] [PROACTIVE_MSG:you insane??]
+"#;
 
 pub async fn chat_completion(
     api_key: &str,
@@ -46,18 +56,18 @@ pub async fn chat_completion(
         messages.push(json!({ "role": role, "content": content }));
     }
 
-    let current_time = Local::now().format("%Y-%m-%dT%H:%M:%S%:z").to_string();
+    // let current_time = Local::now().format("%Y-%m-%dT%H:%M:%S%:z").to_string();
 
-    let final_input = format!(
-        "{}\n\n<system_override>\nCurrent time: {}\n\
-         Your reply MUST end with exactly this structure, replacing the <brackets>:\n\
-         [PROACTIVE_TIME:<future ISO 8601 time>] [PROACTIVE_MSG:<your proactive message>]\n\
-         Failure to include this will crash the app.\n\
-         </system_override>",
-        user_input, current_time
-    );
+    // let final_input = format!(
+    //     "{}\n\n<system_override>\nCurrent time: {}\n\
+    //      Your reply MUST end with exactly this structure, replacing the <brackets>:\n\
+    //      [PROACTIVE_TIME:<future ISO 8601 time>] [PROACTIVE_MSG:<your proactive message>]\n\
+    //      Failure to include this will crash the app.\n\
+    //      </system_override>",
+    //     user_input, current_time
+    // );
 
-    messages.push(json!({ "role": "user", "content": final_input }));
+    messages.push(json!({ "role": "user", "content": user_input }));
 
     dbg!(&messages);
 
@@ -65,7 +75,7 @@ pub async fn chat_completion(
         "model": model_name,
         "messages": messages,
         "stream": false,
-        "temperature": 1.3
+        "temperature": 0.6
     });
 
     let client = Client::new();
@@ -226,4 +236,5 @@ pub struct MainAiResponseWithId {
     pub proactive_time: Option<String>,
     pub proactive_message: Option<String>,
     pub user_log_id: i64,
+    pub ai_log_id: i64,
 }

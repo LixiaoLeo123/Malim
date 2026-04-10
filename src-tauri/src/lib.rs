@@ -23,7 +23,7 @@ mod memory;
 use crate::memory::init_db;
 use memory::{
     get_alpha, get_daily_reading, get_reading_by_date, get_vocabulary_expectation,
-    get_words_in_p_range, record_word_click, run_global_calibration, update_daily_reading,
+    get_words_in_p_range, record_word_click, record_unparsed_text_words, run_global_calibration, update_daily_reading,
 };
 use rusqlite::Connection;
 
@@ -34,7 +34,9 @@ mod scrapers;
 use scrapers::commands::{clear_emitted_urls, get_feed, get_sources_by_language};
 
 mod chat;
-use chat::commands::{send_message, trigger_proactive, get_chat_logs, save_grammar_corrections};
+use chat::commands::{
+    get_chat_logs, save_grammar_corrections, send_message, trigger_proactive, update_chat_parsed,
+};
 
 mod translation;
 use translation::commands::translate;
@@ -42,235 +44,130 @@ use translation::commands::translate;
 mod grammar_correction;
 use grammar_correction::commands::check_grammar;
 
-// ---prompts---
-const BASE_RULES: &str = r#"
-You are a precise JSON generator.
-STRICT RULES:
-1. Your output MUST be a single, valid JSON object.
-2. Do NOT use Markdown code blocks (```json ... ```) in your final output.
-3. Use ONLY standard ASCII punctuation.
-4. Do NOT include any text outside the JSON object.
-"#;
-const KR_RULES: &str = r#"
-Task: Analyze the Korean sentence below.
-1.  TRANSLATION: Provide a natural English translation of the entire sentence.
-2.  TOKENIZATION: Split into morphemes.
-    - CRITICAL: Do NOT decompose Hangul characters (Jamo).
-    - CRITICAL: Do NOT discard punctuation. Output punctuation as separate blocks with pos 'punctuation'.
-3.  POS Tagging (Strictly use these tags only):
-    - noun, pronoun, verb, adjective, adverb, particle, ending, punctuation, unknown.
-4.  DEFINITION: Provide a concise English definition for each block.
-5.  CHINESE ROOT: For Sino-Korean words, providing 'chinese_root' is MANDATORY.
-"#;
-const KR_EXAMPLE: &str = r#"
-Example Output:
+mod saves;
+use saves::{check_import_file, create_export_temp_file, execute_import, get_backup_definitions};
+
+mod brain;
+use brain::get_brain_words;
+
+
+
+pub fn build_prompt(lang: &str, sentence: &str, stress_mark: bool, show_grammar_notes: bool) -> String {
+    let mut prompt = String::with_capacity(1024);
+
+    prompt.push_str("STRICT RULES:\n");
+    prompt.push_str("1. Output MUST be a single, valid JSON object.\n");
+    prompt.push_str("2. Do NOT use Markdown code blocks (```json ... ```) in output.\n");
+    prompt.push_str("3. Use ONLY standard ASCII punctuation.\n");
+    prompt.push_str("4. Do NOT include any text outside the JSON object.\n\n");
+
+    match lang {
+        "KR" => {
+            prompt.push_str("Task: Korean morphological analysis.\n");
+            prompt.push_str("RULES:\n");
+            prompt.push_str("- Do NOT decompose Hangul characters (Jamo).\n");
+            prompt.push_str("- Output punctuation as separate blocks with pos 'punctuation'.\n");
+            prompt.push_str("POS: noun, pronoun, verb, adjective, adverb, particle, ending, punctuation, unknown.\n");
+            prompt.push_str("FIELDS: text, pos, definition, chinese_root (MANDATORY for Sino-Korean, else null)");
+            
+            if show_grammar_notes {
+                prompt.push_str(", grammar_note");
+            }
+            prompt.push_str(".\n\n");
+
+            let note_noun = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+            let note_particle = if show_grammar_notes { r#", "grammar_note": "Location marker"# } else { "" };
+            let note_verb = if show_grammar_notes { r#", "grammar_note": "Formal, present tense"# } else { "" };
+            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+
+            let example = format!(
+r#"Example Output:
 {{
-    "translation": "I go to school.",
-    "blocks": [
-        {{ "text": "학교", "pos": "noun", "definition": "school", "chinese_root": "学校", "grammar_note": null }},
-        {{ "text": "에", "pos": "particle", "definition": "to (indicates direction)", "chinese_root": null, "grammar_note": "Location marker" }},
-        {{ "text": "갑니다", "pos": "verb", "definition": "go", "chinese_root": null, "grammar_note": "Formal, present tense" }},
-        {{ "text": ".", "pos": "punctuation", "definition": ".", "chinese_root": null, "grammar_note": null }}
-    ]
+  "translation": "I go to school.",
+  "blocks": [
+    {{ "text": "학교", "pos": "noun", "definition": "school", "chinese_root": "学校"{note_noun} }},
+    {{ "text": "에", "pos": "particle", "definition": "to", "chinese_root": null{note_particle} }},
+    {{ "text": "갑니다", "pos": "verb", "definition": "go", "chinese_root": null{note_verb} }},
+    {{ "text": ".", "pos": "punctuation", "definition": ".", "chinese_root": null{note_punct} }}
+  ]
 }}
-"#;
-const RU_RULES_BASE: &str = r#"
-You are a Russian linguistic analyzer for beginner learners.
-Your goal is to make Russian fully understandable.
+"#,
+                note_noun = note_noun,
+                note_particle = note_particle,
+                note_verb = note_verb,
+                note_punct = note_punct
+            );
+            prompt.push_str(&example);
+        }
+        "RU" => {
+            prompt.push_str("Task: Russian linguistic analysis.\n");
+            prompt.push_str("CORE: Context determines grammar. Analyze SYNTAX (verb government, prepositions) to determine Case.\n");
+            prompt.push_str("POS: noun, verb, adjective, adverb, pronoun, preposition, conjunction, particle, punctuation, unknown.\n");
+            prompt.push_str("FIELDS (if meaningful): text, pos, definition, lemma, gram_case (1-7), gram_gender (m/f/n), gram_number (sg/pl), tense (pres/past/fut/imp/inf/gerund), aspect (pf/impf).\n");
+            prompt.push_str("RULES:\n");
+            prompt.push_str("- Nouns: Case depends on context (e.g., в/на+loc=Case 6, в/на+motion=Case 4, transitive verb=Case 4, quantifiers/negation=Case 2).\n");
+            prompt.push_str("- Adjectives: Omit case/gender/number. Participles=adjective.\n");
+            prompt.push_str("- Verbs: Lemma MUST be Infinitive (preserve aspect). Gerunds=verb(tense:gerund).\n");
+            prompt.push_str("- Pronouns: 1st/2nd person defaults to 'm'.\n");
 
-Return a single JSON object:
+            if stress_mark {
+                prompt.push_str("- Stress: Add acute accents (´) to stressed vowels in 'text' and 'lemma'. NO stress on monosyllabic/English words.\n");
+            }
 
-{
-  "translation": "...",
+            if show_grammar_notes {
+                prompt.push_str("- Grammar Note: Briefly explain syntactic role and why its form looks like this.\n");
+            }
+            prompt.push_str("\n");
+
+
+            let he = "Он";
+            let (read, read_lemma, book, book_lemma, table, table_lemma) = if stress_mark {
+                ("прочита́л", "прочита́ть", "кни́гу", "кни́га", "столе́", "сто́л")
+            } else {
+                ("прочитал", "прочитать", "книгу", "книга", "столе", "стол")
+            };
+
+
+            let note_pron = if show_grammar_notes { r#", "grammar_note": "Subject, nominative case."# } else { "" };
+            let note_verb = if show_grammar_notes { r#", "grammar_note": "Past tense, perfective aspect."# } else { "" };
+            let note_noun1 = if show_grammar_notes { r#", "grammar_note": "Direct object, accusative case."# } else { "" };
+            let note_prep = if show_grammar_notes { r#", "grammar_note": "Governs Prepositional case for location."# } else { "" };
+            let note_noun2 = if show_grammar_notes { r#", "grammar_note": "Prepositional case governed by 'на'."# } else { "" };
+            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+
+            let example = format!(
+r#"Example Output:
+{{
+  "translation": "He read the book on the table.",
   "blocks": [
-    {
-      "text": "...",
-      "pos": "...",
-      "definition": "...",
-      "lemma": "...",
-      "gram_case": 1-7,
-      "gram_gender": "m" | "f" | "n",
-      "gram_number": "sg" | "pl",
-      "tense": "pres" | "past" | "fut" | "imp" | "inf" | "gerund",
-      "aspect": "pf" | "impf",
-      "grammar_note": "..."
-    }
+    {{ "text": "{he}", "pos": "pronoun", "definition": "he", "lemma": "он", "gram_case": 1, "gram_gender": "m", "gram_number": "sg"{note_pron} }},
+    {{ "text": "{read}", "pos": "verb", "definition": "read", "lemma": "{read_lemma}", "tense": "past", "aspect": "pf"{note_verb} }},
+    {{ "text": "{book}", "pos": "noun", "definition": "book", "lemma": "{book_lemma}", "gram_case": 4, "gram_gender": "f", "gram_number": "sg"{note_noun1} }},
+    {{ "text": "на", "pos": "preposition", "definition": "on", "lemma": "на"{note_prep} }},
+    {{ "text": "{table}", "pos": "noun", "definition": "table", "lemma": "{table_lemma}", "gram_case": 6, "gram_gender": "m", "gram_number": "sg"{note_noun2} }},
+    {{ "text": ".", "pos": "punctuation", "definition": "."{note_punct} }}
   ]
+}}
+"#,
+                he=he, note_pron=note_pron,
+                read=read, read_lemma=read_lemma, note_verb=note_verb,
+                book=book, book_lemma=book_lemma, note_noun1=note_noun1,
+                note_prep=note_prep,
+                table=table, table_lemma=table_lemma, note_noun2=note_noun2,
+                note_punct=note_punct
+            );
+            prompt.push_str(&example);
+        }
+        _ => {
+            prompt.push_str("Task: Sentence analysis (translation, tokenization, POS, definitions).\n");
+        }
+    }
+
+    let _ = write!(prompt, "\nSentence to analyze: {}\n", sentence);
+    
+    prompt
 }
 
-CORE PRINCIPLE:
-**Context determines grammar.**
-You must analyze SYNTAX (verb government, prepositions, quantifiers) to determine Case.
-Do NOT rely solely on word endings.
-
-FIELD RULES:
-
-1. Always include:
-   text, pos, definition.
-
-2. Include grammatical fields only if meaningful.
-   Do not include unused fields.
-
-3. **POS must be one of the following**:
-   - noun
-   - verb
-   - adjective
-   - adverb
-   - pronoun
-   - preposition (e.g., в, на, к, о)
-   - conjunction (e.g., и, а, но)
-   - particle
-   - punctuation
-   - unknown
-
-4. Participles → adjective.
-5. Gerunds → verb (tense = "gerund").
-"#;
-const RU_RULES_STRESS: &str = r#"
-6. **Stress Marks**:
-   You MUST add stress marks (acute accents) to Russian words in the `text` and `lemma` fields.
-   - Mark the stressed vowel with an acute accent (e.g., "кни́га", "чита́ть").
-   - Do NOT add stress to monosyllabic words (e.g., "я", "в", "на") unless necessary for disambiguation.
-   - Do NOT add stress to numbers or English words.
-"#;
-const RU_RULES_REST: &str = r#"
-CATEGORY-SPECIFIC LOGIC:
-
-**NOUNS**:
-Include lemma, gram_case, gram_gender, gram_number.
-**Case Logic (CRITICAL)**:
-- Check the PREPOSITION. E.g., "в/на" + location = Case 6; "в/на" + motion = Case 4.
-- Check the VERB. E.g., transitive verbs usually take Case 4 for direct objects.
-- Check for NEGATION (e.g., "нет"). "нет" + noun = Case 2.
-- Check for QUANTIFIERS. Words like "много" (many/much), "немного" (a little), "мало" (few), "сколько" (how much/many) **ALWAYS** govern Case 2 (Genitive).
-  - Example: "немного та́йны" -> "та́йны" is Case 2 (Genitive Singular), NOT Nominative.
-
-**ADJECTIVES**:
-Include lemma.
-**CRITICAL RESTRICTION**: Do NOT include `gram_case`, `gram_gender`, or `gram_number` for adjectives.
-- Simply identify the word as an adjective and provide its base form (lemma).
-- Ensure the POS is correct. If it modifies a noun, it is an adjective.
-
-**VERBS**:
-Include lemma.
-Include tense if identifiable.
-Include aspect (pf or impf).
-**Lemma Logic**:
-- The `lemma` MUST always be the **Infinitive** (the uninflected base form).
-- For **Perfective verbs**, provide the Perfective Infinitive (e.g., for "напишу́", lemma is "написа́ть").
-- For **Imperfective verbs**, provide the Imperfective Infinitive (e.g., for "чита́ю", lemma is "чита́ть").
-
-**PRONOUNS (Personal)**:
-Include lemma, gram_case, gram_gender, gram_number.
-- For 1st/2nd person ("я", "ты"), gender defaults to "m" unless context proves otherwise.
-
-GRAMMAR_NOTE:
-
-Explain briefly in simple English:
-- what role the word plays in the sentence
-- why its form looks like this
-- mention the ending change if relevant
-
-Do NOT repeat the lemma.
-Do NOT use rigid labels like "Base form:", "Why:", "How:".
-Write naturally and concisely.
-"#;
-const RU_EXAMPLE_STRESS: &str = r#"
-Example Outputs:
-
-{
-  "translation": "There is a little mystery on the table.",
-  "blocks": [
-    {
-      "text": "На",
-      "pos": "preposition",
-      "definition": "on",
-      "lemma": "на",
-      "grammar_note": "Governs the Prepositional case when indicating location."
-    },
-    {
-      "text": "столе́",
-      "pos": "noun",
-      "definition": "table",
-      "lemma": "сто́л",
-      "gram_case": 6,
-      "gram_gender": "m",
-      "gram_number": "sg",
-      "grammar_note": "Prepositional case indicating location. Note the stress shifts to the ending."
-    },
-    {
-      "text": "немно́го",
-      "pos": "adverb",
-      "definition": "a little",
-      "lemma": "немно́го",
-      "grammar_note": "Quantifier acting as an adverb, modifying the quantity of the noun."
-    },
-    {
-      "text": "та́йны",
-      "pos": "noun",
-      "definition": "mystery",
-      "lemma": "та́йна",
-      "gram_case": 2,
-      "gram_gender": "f",
-      "gram_number": "sg",
-      "grammar_note": "Genitive case governed by the quantifier 'немного'. The ending '-ы' is genitive singular."
-    },
-    {
-      "text": ".",
-      "pos": "punctuation",
-      "definition": "."
-    }
-  ]
-}
-"#;
-const RU_EXAMPLE_NO_STRESS: &str = r#"
-Example Outputs:
-
-{
-  "translation": "There is a little mystery on the table.",
-  "blocks": [
-    {
-      "text": "На",
-      "pos": "preposition",
-      "definition": "on",
-      "lemma": "на",
-      "grammar_note": "Governs the Prepositional case when indicating location."
-    },
-    {
-      "text": "столе",
-      "pos": "noun",
-      "definition": "table",
-      "lemma": "стол",
-      "gram_case": 6,
-      "gram_gender": "m",
-      "gram_number": "sg",
-      "grammar_note": "Prepositional case indicating location. Note the stress shifts to the ending."
-    },
-    {
-      "text": "немного",
-      "pos": "adverb",
-      "definition": "a little",
-      "lemma": "немного",
-      "grammar_note": "Quantifier acting as an adverb, modifying the quantity of the noun."
-    },
-    {
-      "text": "тайны",
-      "pos": "noun",
-      "definition": "mystery",
-      "lemma": "тайна",
-      "gram_case": 2,
-      "gram_gender": "f",
-      "gram_number": "sg",
-      "grammar_note": "Genitive case governed by the quantifier 'немного'. The ending '-ы' is genitive singular."
-    },
-    {
-      "text": ".",
-      "pos": "punctuation",
-      "definition": "."
-    }
-  ]
-}
-"#;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WordBlock {
     text: String,
@@ -774,40 +671,6 @@ async fn ensure_audio_cached(
     Ok(out_path)
 }
 
-// --- AI ---
-fn build_prompt(lang: &str, sentence: &str, stress_mark: bool) -> String {
-    let estimated_capacity = BASE_RULES.len() + sentence.len() + 256;
-
-    let mut prompt = String::with_capacity(estimated_capacity);
-    write!(prompt, "{}", BASE_RULES).unwrap();
-
-    match lang {
-        "KR" => {
-            write!(prompt, "{}", KR_RULES).unwrap();
-            write!(prompt, "{}", KR_EXAMPLE).unwrap();
-            write!(prompt, "\nSentence to analyze: {}\n", sentence).unwrap();
-        }
-        "RU" => {
-            write!(prompt, "{}", RU_RULES_BASE).unwrap();
-            if stress_mark {
-                write!(prompt, "{}", RU_RULES_STRESS).unwrap();
-            }
-            write!(prompt, "{}", RU_RULES_REST).unwrap();
-            if stress_mark {
-                write!(prompt, "{}", RU_EXAMPLE_STRESS).unwrap();
-            } else {
-                write!(prompt, "{}", RU_EXAMPLE_NO_STRESS).unwrap();
-            }
-            write!(prompt, "\nSentence to analyze: {}\n", sentence).unwrap();
-        }
-        _ => {
-            write!(prompt, "Analyze the sentence below and provide a JSON output with translation, tokenization, POS tagging, and definitions for each token.\nSentence: {}\n", sentence).unwrap();
-        }
-    }
-
-    prompt
-}
-
 // fn create_overlapping_chunks(text: &str, chunk_size: usize, overlap_size: usize) -> Vec<String> {
 //     let preliminary_sentences: Vec<&str> = text
 //         .split_inclusive(|c: char| c.is_ascii_punctuation() || matches!(c, '。' | '\n'))
@@ -1022,6 +885,7 @@ async fn parse_text(
     ruaccent_enabled: bool, // only used for Russian, whether to get stress marks from accent_url(ruaccent) or just llm
     ruaccent_url: String,
     old_sentences: Option<Vec<Sentence>>, //as cache in edit mode
+    show_grammar_notes: bool,
 ) -> Result<Vec<Sentence>, String> {
     if api_key.is_empty() {
         return Err("API Key is missing".to_string());
@@ -1210,7 +1074,8 @@ async fn parse_text(
                 (b.blocks, b.translation)
             } else {
                 let clean_raw = raw.replace('\u{0301}', "");
-                let prompt = build_prompt(&ctx.language, &raw, !ruaccent_enabled);
+                let prompt =
+                    build_prompt(&ctx.language, &raw, !ruaccent_enabled, show_grammar_notes);
                 let ai_future = call_ai_api(&ctx.api_key, &ctx.api_url, &ctx.model_name, prompt);
 
                 let accent_future = async {
@@ -1601,12 +1466,15 @@ pub fn run() {
                             None
                         }
                     }
-                }
+                },
             });
 
             Ok(())
         })
         .plugin(tauri_plugin_media_toolkit::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             parse_text,
             save_data,
@@ -1617,6 +1485,7 @@ pub fn run() {
             get_vocabulary_expectation,
             run_global_calibration,
             record_word_click,
+            record_unparsed_text_words,
             get_daily_reading,
             get_reading_by_date,
             get_alpha,
@@ -1624,12 +1493,18 @@ pub fn run() {
             get_sources_by_language,
             get_feed,
             clear_emitted_urls,
-            send_message, 
+            send_message,
             trigger_proactive,
             translate,
             check_grammar,
             get_chat_logs,
-            save_grammar_corrections
+            save_grammar_corrections,
+            check_import_file,
+            create_export_temp_file,
+            get_backup_definitions,
+            execute_import,
+            get_brain_words,
+            update_chat_parsed
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

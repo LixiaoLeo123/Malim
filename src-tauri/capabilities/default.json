@@ -6,6 +6,24 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "media-toolkit:default"
+    "media-toolkit:allow-play",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    
+    {
+      "identifier": "fs:allow-copy-file",
+      "allow": [
+        { "path": "$TEMP/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$APPDATA/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$DOWNLOAD/**" }
+      ]
+    }
   ]
 }

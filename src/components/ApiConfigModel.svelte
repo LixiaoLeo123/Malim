@@ -10,7 +10,22 @@
     } from "lucide-svelte";
     import { slide } from "svelte/transition";
 
-    export let open = false;
+    import { open, save } from "@tauri-apps/plugin-dialog";
+    import { copyFile } from "@tauri-apps/plugin-fs";
+    import { invoke } from "@tauri-apps/api/core";
+    import { notifications } from "$lib/notificationStore";
+
+    let showDataManagement = false;
+    let backupItems: Array<{
+        name: string;
+        description: string;
+        checked: boolean;
+    }> = [];
+    let importFilePath = "";
+    let foundImportFiles: string[] = [];
+    let importSelections: Record<string, boolean> = {};
+
+    export let opened = false;
     let showTtsApiSelector = false;
 
     type AiConfig = {
@@ -50,10 +65,11 @@
     let tempSyncServerUrl = "";
     let tempUserId = "";
     let tempMemoryModelEnabled = true;
+    let tempGrammarNotesEnabled = true;
 
     let openRoleSelector: Partial<Record<AiRole, boolean>> = {};
 
-    $: if (open) {
+    $: if (opened) {
         tempAiConfigList = $settings.aiConfigList
             ? JSON.parse(JSON.stringify($settings.aiConfigList))
             : [];
@@ -80,9 +96,98 @@
         tempSyncServerUrl = $settings.syncServerUrl ?? "";
         tempUserId = $settings.userId ?? "";
         tempMemoryModelEnabled = $settings.memoryModelEnabled ?? true;
+        tempGrammarNotesEnabled = $settings.showGrammarNotes ?? true;
 
         expandedConfigId = null;
         openRoleSelector = {};
+
+        invoke("get_backup_definitions").then((res) => {
+            backupItems = res as Array<{
+                name: string;
+                description: string;
+                checked: boolean;
+            }>;
+        });
+        showDataManagement = false;
+        importFilePath = "";
+        foundImportFiles = [];
+    }
+
+    async function handleExport() {
+        const selected = backupItems
+            .filter((item) => item.checked)
+            .map((item) => item.name);
+        if (selected.length === 0) {
+            notifications.warning("Please select at least one item.");
+            return;
+        }
+
+        try {
+            const tempPath = (await invoke("create_export_temp_file", {
+                selectedNames: selected,
+            })) as string;
+
+            const destPath = await save({
+                filters: [{ name: "Backup", extensions: ["zip"] }],
+                defaultPath: `malim-backup-${Date.now()}.zip`,
+            });
+
+            if (destPath) {
+                await copyFile(tempPath, destPath);
+                notifications.success("Export successful!");
+            }
+        } catch (e) {
+            console.error(e);
+            notifications.error(`Export failed: ${e}`);
+        }
+    }
+
+    async function selectImportFile() {
+        const selected = await open({
+            filters: [{ name: "Backup", extensions: ["zip"] }],
+            multiple: false,
+        });
+
+        if (selected) {
+            importFilePath = selected as string;
+            foundImportFiles = [];
+            importSelections = {};
+
+            try {
+                const files = await invoke("check_import_file", {
+                    filePath: importFilePath,
+                });
+                foundImportFiles = files as string[];
+                if (foundImportFiles.length === 0) {
+                    notifications.warning("No valid backup files found.");
+                } else {
+                    foundImportFiles.forEach(
+                        (f) => (importSelections[f] = true),
+                    );
+                }
+            } catch (e) {
+                notifications.error(`Failed to read backup: ${e}`);
+            }
+        }
+    }
+
+    async function handleImport() {
+        const selected = Object.keys(importSelections).filter(
+            (k) => importSelections[k],
+        );
+        if (selected.length === 0) return;
+
+        try {
+            const res = await invoke("execute_import", {
+                filePath: importFilePath,
+                selectedNames: selected,
+            });
+            notifications.success(res as string);
+            importFilePath = "";
+            foundImportFiles = [];
+        } catch (e) {
+            notifications.error(`Import failed: ${e}`);
+        }
     }
 
     function generateId() {
@@ -155,8 +260,9 @@
             syncServerUrl: tempSyncServerUrl.trim(),
             userId: tempUserId.trim(),
             memoryModelEnabled: tempMemoryModelEnabled,
+            showGrammarNotes: tempGrammarNotesEnabled,
         }));
-        open = false;
+        opened = false;
     }
 
     const roles: { key: AiRole; label: string; description: string }[] = [
@@ -184,12 +290,12 @@
     ];
 </script>
 
-{#if open}
+{#if opened}
     <button
         type="button"
         class="fixed inset-0 bg-black/40 z-40 cursor-default"
         transition:fade={{ duration: 200 }}
-        on:click={() => (open = false)}
+        on:click={() => (opened = false)}
     >
         <span class="sr-only">Close settings dialog</span>
     </button>
@@ -432,6 +538,26 @@
                         {/each}
                     </div>
                 {/if}
+            </div>
+
+            <div class="flex items-center justify-between mt-3 mb-2">
+                <span class="text-sm text-zinc-600 dark:text-zinc-300"
+                    >Show Grammar Notes</span
+                >
+                <button
+                    type="button"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempGrammarNotesEnabled
+                        ? 'bg-zinc-900 dark:bg-zinc-100'
+                        : 'bg-zinc-300 dark:bg-zinc-700'}"
+                    on:click={() =>
+                        (tempGrammarNotesEnabled = !tempGrammarNotesEnabled)}
+                >
+                    <span
+                        class="inline-block h-5 w-5 transform rounded-full bg-white dark:bg-zinc-900 transition-transform {tempGrammarNotesEnabled
+                            ? 'translate-x-5'
+                            : 'translate-x-1'}"
+                    ></span>
+                </button>
             </div>
 
             <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
@@ -699,15 +825,155 @@
                     </label>
                 {/if}
             {/if}
-        </div>
 
+            <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
+
+            <div class="space-y-2">
+                <button
+                    type="button"
+                    on:click={() => (showDataManagement = !showDataManagement)}
+                    class="w-full flex items-center justify-between p-2 bg-zinc-50 dark:bg-zinc-800 rounded-lg text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition"
+                >
+                    <span>Data Management</span>
+                    <ChevronDown
+                        size={16}
+                        class="transition-transform duration-200 {showDataManagement
+                            ? 'rotate-180'
+                            : ''}"
+                    />
+                </button>
+
+                {#if showDataManagement}
+                    <div
+                        class="p-3 bg-zinc-50 dark:bg-zinc-800 rounded-lg space-y-4 border border-zinc-200 dark:border-zinc-700"
+                        transition:slide={{ duration: 200 }}
+                    >
+                        <div>
+                            <h4
+                                class="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase mb-2"
+                            >
+                                Export Data
+                            </h4>
+                            <div class="space-y-1 mb-2">
+                                {#each backupItems as item (item.name)}
+                                    <label
+                                        class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            bind:checked={item.checked}
+                                            class="rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:bg-zinc-900 dark:border-zinc-600"
+                                        />
+                                        <span>{item.name}</span>
+                                        <span class="text-xs text-zinc-400"
+                                            >({item.description})</span
+                                        >
+                                    </label>
+                                {/each}
+                            </div>
+                            <button
+                                type="button"
+                                on:click={handleExport}
+                                class="w-full px-3 py-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-600 transition"
+                            >
+                                Export to Zip
+                            </button>
+                        </div>
+
+                        <hr class="border-zinc-200 dark:border-zinc-700" />
+
+                        <div>
+                            <h4
+                                class="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase mb-2"
+                            >
+                                Import Data
+                            </h4>
+
+                            {#if !importFilePath}
+                                <button
+                                    type="button"
+                                    on:click={selectImportFile}
+                                    class="w-full px-3 py-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-600 transition"
+                                >
+                                    Select Backup File (.zip)
+                                </button>
+                            {:else}
+                                <div class="space-y-2">
+                                    <div
+                                        class="text-xs text-zinc-500 dark:text-zinc-400 truncate"
+                                    >
+                                        Selected: {importFilePath}
+                                    </div>
+
+                                    {#if foundImportFiles.length > 0}
+                                        <div
+                                            class="text-xs text-zinc-500 dark:text-zinc-400 mb-1"
+                                        >
+                                            Found items (select to overwrite):
+                                        </div>
+                                        <div class="space-y-1 mb-2">
+                                            {#each foundImportFiles as fileName}
+                                                <label
+                                                    class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300"
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        bind:checked={
+                                                            importSelections[
+                                                                fileName
+                                                            ]
+                                                        }
+                                                        class="rounded border-zinc-300 text-blue-600 focus:ring-blue-500 dark:bg-zinc-900 dark:border-zinc-600"
+                                                    />
+                                                    <span>{fileName}</span>
+                                                </label>
+                                            {/each}
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button
+                                                type="button"
+                                                on:click={handleImport}
+                                                class="flex-1 px-3 py-1.5 bg-red-500 hover:bg-red-600 rounded-lg text-sm font-medium text-white transition"
+                                            >
+                                                Overwrite Selected
+                                            </button>
+                                            <button
+                                                type="button"
+                                                on:click={() => {
+                                                    importFilePath = "";
+                                                    foundImportFiles = [];
+                                                }}
+                                                class="px-3 py-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-300 dark:hover:bg-zinc-600 transition"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    {:else}
+                                        <div class="text-xs text-red-500">
+                                            No valid data found in this archive.
+                                        </div>
+                                        <button
+                                            type="button"
+                                            on:click={() =>
+                                                (importFilePath = "")}
+                                            class="text-xs text-zinc-500 hover:text-zinc-700"
+                                            >Choose another file</button
+                                        >
+                                    {/if}
+                                </div>
+                            {/if}
+                        </div>
+                    </div>
+                {/if}
+            </div>
+        </div>
         <div
             class="flex justify-end gap-2 px-6 py-3 border-t border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900"
         >
             <button
                 type="button"
                 class="px-4 py-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-                on:click={() => (open = false)}
+                on:click={() => (opened = false)}
             >
                 Cancel
             </button>

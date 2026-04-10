@@ -25,14 +25,14 @@ export const activeArticleId = writable<string | null>(null);
 export const editorDraft = writable<Draft>({
     title: '',
     content: '',
-    language: 'KR'
+    language: 'RU'
 });
 
 
 
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substring(2);
-}
+// function generateId() {
+//   return Date.now().toString(36) + Math.random().toString(36).substring(2);
+// }
 
 export const settings = writable<Settings>({
   aiConfigList: [],
@@ -44,6 +44,7 @@ export const settings = writable<Settings>({
   grammarAiConfigId: '',
 
   concurrency: 1,
+  showGrammarNotes: true,
   autoSpeak: false,
   preCacheAudio: true,
   ttsConcurrency: 1,
@@ -60,6 +61,7 @@ export const settings = writable<Settings>({
   userAvatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=User' ,
   aiAvatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Malim' ,
   proactiveEvent: null,
+  aiNickname: 'Malim',
 });
 
 export const parsingQueue = writable<string[]>([]); // article id

@@ -5,10 +5,17 @@
         isSidebarOpen,
         settings,
     } from "../lib/stores";
-    import { Menu, BookOpen, Type } from "lucide-svelte";
+    import {
+        Menu,
+        BookOpen,
+        Type,
+        CheckCircle2,
+        Circle,
+        Star,
+    } from "lucide-svelte";
     import { fade, fly } from "svelte/transition";
     import Flag from "./Flag.svelte";
-    import type { Sentence, Block } from "../lib/types";
+    import type { Sentence, Block, Article } from "../lib/types";
     import { onMount, onDestroy } from "svelte";
     import { playAudio, stopAudio } from "../lib/audio";
     import { invoke } from "@tauri-apps/api/core";
@@ -16,18 +23,32 @@
     $: article = $articles.find((a) => a.id === $activeArticleId) as any;
 
     let lastClickedBlock: Block | null = null;
-
     let activeBlock: Block | null = null;
     let activeBlockEl: HTMLElement | null = null;
     let activeSentence: Sentence | null = null;
-
     let viewMode: "word" | "sentence" = "word";
-
     let popoverPosition = { top: 0, left: 0, align: "bottom", arrowLeft: 0 };
     let isGrammarExpanded = false;
 
-    let clickedLemmas = new Set<string>();
+    let clickedLemmasBySection = new Map<number, Set<string>>();
     let animationFrameId: number;
+
+    const CHECKPOINT_SIZE = 5;
+    let completedCheckpoints = new Set<number>();
+
+    let sections: Sentence[][] = [];
+    $: {
+        sections = [];
+        if (article && article.sentences) {
+            for (
+                let i = 0;
+                i < article.sentences.length;
+                i += CHECKPOINT_SIZE
+            ) {
+                sections.push(article.sentences.slice(i, i + CHECKPOINT_SIZE));
+            }
+        }
+    }
 
     function handleKeydown(event: KeyboardEvent) {
         if (
@@ -36,7 +57,6 @@
         ) {
             return;
         }
-
         switch (event.key) {
             case "1":
                 event.preventDefault();
@@ -83,14 +103,12 @@
 
     function getRussianNounOrPronounColor(block: Block) {
         if (block.pos !== "noun" && block.pos !== "pronoun") return null;
-
         if (block.gram_gender === "m")
             return "bg-violet-50 text-violet-700 active:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200 dark:active:bg-violet-900/55";
         if (block.gram_gender === "f")
             return "bg-cyan-50 text-cyan-700 active:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-200 dark:active:bg-cyan-900/55";
         if (block.gram_gender === "n")
             return "bg-blue-50 text-blue-700 active:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:active:bg-blue-900/55";
-
         return colorMap["noun"];
     }
 
@@ -104,18 +122,26 @@
         event: MouseEvent,
         block: Block,
         sentence: Sentence,
+        sectionIdx: number,
     ) {
         event.stopPropagation();
-
         if (
             viewMode === "word" &&
             block.pos !== "unknown" &&
             block.pos !== "punctuation" &&
             block.lemma
         ) {
-            if (!clickedLemmas.has(block.lemma)) {
-                clickedLemmas.add(block.lemma);
-                if ($settings.memoryModelEnabled && block.lemma != lastClickedBlock?.lemma) {
+            if (!clickedLemmasBySection.has(sectionIdx)) {
+                clickedLemmasBySection.set(sectionIdx, new Set());
+            }
+            const sectionLemmas = clickedLemmasBySection.get(sectionIdx)!;
+
+            if (!sectionLemmas.has(block.lemma)) {
+                sectionLemmas.add(block.lemma);
+                if (
+                    $settings.memoryModelEnabled &&
+                    block.lemma != lastClickedBlock?.lemma
+                ) {
                     invoke("record_word_click", {
                         lemma: block.lemma,
                         clicked: true,
@@ -147,53 +173,79 @@
         }
     }
 
-    function handleFinishReading() {
-        if (!article || !article.sentences) return;
+    function handleCheckpointClick(sectionIdx: number) {
+        if (!article || !sections[sectionIdx]) return;
 
-        launchConfetti();
+        if (completedCheckpoints.has(sectionIdx)) return;
 
-        const allLemmasInArticle = new Set<string>();
-        article.sentences.forEach((s: Sentence) => {
+        const currentSectionSentences = sections[sectionIdx];
+        const isLastSection = sectionIdx === sections.length - 1;
+
+        const sectionLemmas =
+            clickedLemmasBySection.get(sectionIdx) || new Set();
+        currentSectionSentences.forEach((s: Sentence) => {
             s.blocks.forEach((b: Block) => {
                 if (b.pos !== "unknown" && b.pos !== "punctuation" && b.lemma) {
-                    allLemmasInArticle.add(b.lemma);
+                    if (
+                        !sectionLemmas.has(b.lemma) &&
+                        $settings.memoryModelEnabled
+                    ) {
+                        sectionLemmas.add(b.lemma);
+                        invoke("record_word_click", {
+                            lemma: b.lemma,
+                            clicked: false,
+                        });
+                    }
                 }
             });
         });
 
-        allLemmasInArticle.forEach((lemma) => {
-            if (!clickedLemmas.has(lemma) && $settings.memoryModelEnabled) {
-                invoke("record_word_click", { lemma: lemma, clicked: false });
-            }
-        });
-
-        clickedLemmas.clear();
-
-        let totalWordCount = 0;
-        
-        article.sentences.forEach((s: Sentence) => {
+        let sectionWordCount = 0;
+        currentSectionSentences.forEach((s: Sentence) => {
             if (s.original) {
                 const trimmed = s.original.trim();
                 if (trimmed.length > 0) {
-                    const words = trimmed.split(/\s+/);
-                    totalWordCount += words.length;
+                    sectionWordCount += trimmed.split(/\s+/).length;
                 }
             }
         });
+        invoke("update_daily_reading", { count: sectionWordCount });
 
-        invoke("update_daily_reading", { count: totalWordCount });
+        completedCheckpoints = new Set([...completedCheckpoints, sectionIdx]);
+
+
+        article.completedCheckpointsList = [
+            ...article.completedCheckpointsList ?? [],
+            sectionIdx,
+        ];
+        article.completedCheckpointsList = [...new Set(article.completedCheckpointsList)];
+        article.readProgress = Math.round(
+            (article.completedCheckpointsList.length / sections.length) * 100,
+        );
+        $articles = $articles; // Trigger reactivity for Sidebar to update reading progress
+        console.log(
+            `Completed checkpoint ${sectionIdx + 1}/${sections.length} (${article.readProgress}%)`,
+        );
+
+        setTimeout(() => {
+            completedCheckpoints.delete(sectionIdx);
+            completedCheckpoints = new Set([...completedCheckpoints]);
+        }, 5000);
+
+        if (isLastSection) {
+            launchConfetti();
+            clickedLemmasBySection.clear();
+        }
     }
 
     function launchConfetti() {
         let canvas = document.getElementById(
             "confetti-canvas",
         ) as HTMLCanvasElement | null;
-
         if (!canvas) {
             console.error("Canvas element not found!");
             return;
         }
-
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
@@ -229,19 +281,16 @@
 
         function animate() {
             if (!ctx || !canvas) return;
-
             if (frame >= maxFrames) {
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 return;
             }
-
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             particles.forEach((p) => {
                 p.y += p.vy;
                 p.x += p.vx;
                 p.rotation += p.rotationSpeed;
-
                 ctx.save();
                 ctx.translate(p.x, p.y);
                 ctx.rotate((p.rotation * Math.PI) / 180);
@@ -253,7 +302,6 @@
             frame++;
             animationFrameId = requestAnimationFrame(animate);
         }
-
         animate();
     }
 
@@ -264,15 +312,19 @@
         const screenH = window.innerHeight;
         const popoverWidth = 300;
         const arrowSize = 8;
+
         let popoverLeft = rect.left;
         if (popoverLeft + popoverWidth > screenW - 20)
             popoverLeft = screenW - popoverWidth - 20;
         if (popoverLeft < 10) popoverLeft = 10;
+
         const blockCenter = rect.left + rect.width / 2;
         let arrowLeft = blockCenter - popoverLeft - arrowSize;
         arrowLeft = Math.max(8, Math.min(popoverWidth - 24, arrowLeft));
+
         const spaceBelow = screenH - rect.bottom;
         const showOnTop = spaceBelow < 250;
+
         popoverPosition = {
             left: popoverLeft,
             top: showOnTop ? rect.top - 10 : rect.bottom + 10,
@@ -291,7 +343,8 @@
         if (
             !target.closest(".interactive-block") &&
             !target.closest(".reader-popover") &&
-            !target.closest(".sentence-panel")
+            !target.closest(".sentence-panel") &&
+            !target.closest(".checkpoint-btn")
         ) {
             closePopover();
             if (viewMode === "sentence") {
@@ -315,24 +368,19 @@
             >
                 <Menu size={24} />
             </button>
-
             <div
                 class="relative inline-grid grid-cols-2 bg-zinc-100 rounded-lg p-0.5 dark:bg-zinc-800/50"
             >
-                <!-- sliding indicator -->
                 <div
-                    class="absolute top-0.5 bottom-0.5 left-0.5 w-1/2 bg-white rounded-md shadow-sm
-                           transition-transform duration-200 ease-out dark:bg-zinc-700"
+                    class="absolute top-0.5 bottom-0.5 left-0.5 w-1/2 bg-white rounded-md shadow-sm transition-transform duration-200 ease-out dark:bg-zinc-700"
                     style="transform: translateX({viewMode === 'sentence'
                         ? '100%'
                         : '0%'});"
                 ></div>
 
-                <!-- Word -->
                 <button
-                    class="relative z-10 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium
-           active:scale-95 transition-all
-           {viewMode === 'word'
+                    class="relative z-10 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium active:scale-95 transition-all {viewMode ===
+                    'word'
                         ? 'text-zinc-800 dark:text-zinc-100'
                         : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}"
                     on:click={() => {
@@ -344,11 +392,9 @@
                     <span>Word</span>
                 </button>
 
-                <!-- Sentence -->
                 <button
-                    class="relative z-10 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium
-                           active:scale-95 transition-all
-                           {viewMode === 'sentence'
+                    class="relative z-10 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium active:scale-95 transition-all {viewMode ===
+                    'sentence'
                         ? 'text-zinc-800 dark:text-zinc-100'
                         : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}"
                     on:click={() => {
@@ -361,7 +407,6 @@
                 </button>
             </div>
         </div>
-
         <div class="flex items-center space-x-2">
             <span class="text-sm font-medium text-zinc-500 dark:text-zinc-400">
                 {getLanguageName(article?.language)}
@@ -373,50 +418,78 @@
     <div
         class="flex-1 overflow-y-auto p-6 md:p-10 leading-loose text-lg md:text-xl font-medium text-zinc-800 dark:text-zinc-200 pb-[35vh]"
     >
-        {#if article && article.sentences}
-            {#each article.sentences as sentence}
-                <div
-                    class="mb-4 flex flex-wrap gap-y-2 items-end rounded-lg transition-colors duration-200
-                    {activeSentence === sentence && viewMode === 'sentence'
-                        ? 'bg-zinc-100/80 -mx-2 px-2 dark:bg-zinc-800/50'
-                        : ''}"
-                >
-                    {#each sentence.blocks as block}
-                        <button
-                            class="interactive-block px-1 py-0 mx-[2px] rounded
-                            transition-transform duration-75 ease-out
-                            active:scale-95
-                            {getLanguageName(article?.language) === 'Russian' &&
-                            (block.pos === 'noun' || block.pos === 'pronoun')
-                                ? getRussianNounOrPronounColor(block)
-                                : colorMap[block.pos] || colorMap['unknown']}"
-                            on:click={(e) =>
-                                handleBlockClick(e, block, sentence)}
+        {#if article && article.sentences && sections.length > 0}
+            {#each sections as section, sectionIdx}
+                <div class="relative group/section">
+                    {#each section as sentence}
+                        <div
+                            class="mb-4 flex flex-wrap gap-y-2 items-end rounded-lg transition-colors duration-200 {activeSentence ===
+                                sentence && viewMode === 'sentence'
+                                ? 'bg-zinc-100/80 -mx-2 px-2 dark:bg-zinc-800/50'
+                                : ''}"
                         >
-                            {block.text}
-                            {#if article?.language === "RU" && (block.pos === "noun" || block.pos === "pronoun") && block.gram_case}
-                                <sup
-                                    class="text-[10px] ml-[1px] text-purple-500"
+                            {#each sentence.blocks as block}
+                                <button
+                                    class="interactive-block px-1 py-0 mx-[2px] rounded transition-transform duration-75 ease-out active:scale-95 {getLanguageName(
+                                        article?.language,
+                                    ) === 'Russian' &&
+                                    (block.pos === 'noun' ||
+                                        block.pos === 'pronoun')
+                                        ? getRussianNounOrPronounColor(block)
+                                        : colorMap[block.pos] ||
+                                          colorMap['unknown']}"
+                                    on:click={(e) =>
+                                        handleBlockClick(
+                                            e,
+                                            block,
+                                            sentence,
+                                            sectionIdx,
+                                        )}
                                 >
-                                    {block.gram_case}
-                                </sup>{/if}
-                        </button>
+                                    {block.text}
+                                    {#if article?.language === "RU" && (block.pos === "noun" || block.pos === "pronoun") && block.gram_case}
+                                        <sup
+                                            class="text-[10px] ml-[1px] text-purple-500"
+                                        >
+                                            {block.gram_case}
+                                        </sup>
+                                    {/if}
+                                </button>
+                            {/each}
+                        </div>
                     {/each}
+
+                    <div class="flex items-center mt-2 mb-4">
+                        <div
+                            class="flex-1 border-b border-zinc-200 dark:border-zinc-800/60 mr-4"
+                        ></div>
+
+                        <button
+                            class="checkpoint-btn w-8 h-8 flex items-center justify-center rounded-full border-2 transition-all duration-200
+                {sectionIdx === sections.length - 1
+                                ? completedCheckpoints.has(sectionIdx)
+                                    ? 'border-cyan-400 text-cyan-500 bg-cyan-50 dark:bg-cyan-900/30'
+                                    : 'border-zinc-200 dark:border-zinc-700 hover:border-cyan-400 hover:text-cyan-500 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 text-zinc-400 dark:text-zinc-600'
+                                : completedCheckpoints.has(sectionIdx)
+                                  ? 'border-emerald-400 text-emerald-500 bg-emerald-50 dark:bg-emerald-900/30'
+                                  : 'border-zinc-200 dark:border-zinc-700 hover:border-emerald-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 text-zinc-400 dark:text-zinc-600'}"
+                            on:click|stopPropagation={() =>
+                                handleCheckpointClick(sectionIdx)}
+                            title={sectionIdx === sections.length - 1
+                                ? "Finish Reading"
+                                : `Save Part ${sectionIdx + 1} Progress`}
+                        >
+                            {#if completedCheckpoints.has(sectionIdx)}
+                                <CheckCircle2 size={20} />
+                            {:else if sectionIdx === sections.length - 1}
+                                <Star size={18} />
+                            {:else}
+                                <Circle size={18} />
+                            {/if}
+                        </button>
+                    </div>
                 </div>
             {/each}
-
-            <div class="flex justify-center mt-16 mb-8">
-                <button
-                    class="relative px-8 py-3 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-bold text-lg rounded-full shadow-lg
-                           hover:shadow-xl transform hover:scale-105 active:scale-100 transition-all duration-200
-                           hover:outline-none hover:ring-4 hover:ring-emerald-300 dark:hover:ring-emerald-800"
-                    on:click={handleFinishReading}
-                >
-                    <span class="relative z-10 flex items-center gap-2">
-                        🎉 Finish
-                    </span>
-                </button>
-            </div>
         {:else}
             <div class="text-zinc-400 text-center mt-20 dark:text-zinc-500">
                 No content loaded.
@@ -425,7 +498,6 @@
     </div>
 
     {#if activeBlock && viewMode === "word"}
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
         <div
             class="reader-popover fixed z-50 w-[300px] bg-zinc-900/95 backdrop-blur text-white rounded-xl shadow-2xl p-4"
             style="left: {popoverPosition.left}px; top: {popoverPosition.top}px; transform: translateY({popoverPosition.align ===
@@ -443,11 +515,9 @@
                         [{activeBlock.chinese_root}]
                     </div>
                 {/if}
-
                 <div class="text-lg font-bold text-white">
                     {activeBlock.definition}
                 </div>
-
                 {#if article?.language === "RU" && activeBlock.gram_number === "pl"}
                     <div
                         class="absolute top-2 right-2 w-5 h-5 rounded-full bg-purple-600 text-white text-[10px] flex items-center justify-center"
@@ -455,7 +525,6 @@
                         P
                     </div>
                 {/if}
-
                 {#if article?.language === "RU" && activeBlock.pos === "verb"}
                     <div class="flex gap-2 mt-2 text-xs">
                         {#if activeBlock.tense}
@@ -465,44 +534,30 @@
                                 {activeBlock.tense}
                             </div>
                         {/if}
-
                         {#if activeBlock.aspect}
                             <div
-                                class={`inline-block self-start px-1.5 py-0.5 rounded border text-xs
-                ${
-                    activeBlock.aspect === "pf"
-                        ? "bg-orange-500/15 text-orange-300 border-orange-500/40"
-                        : "bg-cyan-500/15 text-cyan-300 border-cyan-500/40"
-                }`}
+                                class={`inline-block self-start px-1.5 py-0.5 rounded border text-xs ${
+                                    activeBlock.aspect === "pf"
+                                        ? "bg-orange-500/15 text-orange-300 border-orange-500/40"
+                                        : "bg-cyan-500/15 text-cyan-300 border-cyan-500/40"
+                                }`}
                             >
                                 {activeBlock.aspect === "pf" ? "PF" : "IPF"}
                             </div>
                         {/if}
                     </div>
                 {/if}
-
                 {#if article?.language === "RU" && activeBlock.lemma}
                     <div class="text-sm text-zinc-300 mt-1">
-                        Lemma: <span class="font-semibold"
-                            >{activeBlock.lemma}</span
-                        >
+                        Lemma:
+                        <span class="font-semibold">{activeBlock.lemma}</span>
                     </div>
                 {/if}
-
                 {#if activeBlock.grammar_note}
                     <div
                         class="text-zinc-400 text-sm border-t border-zinc-700 pt-2 mt-1"
                     >
-                        <!-- {#if isGrammarExpanded || activeBlock.grammar_note.length < 50} -->
                         {activeBlock.grammar_note}
-                        <!-- {:else}
-                            {activeBlock.grammar_note.slice(0, 50)}...
-                            <button
-                                class="text-blue-400 ml-1 hover:underline"
-                                on:click|stopPropagation={() =>
-                                    (isGrammarExpanded = true)}>more</button
-                            >
-                        {/if} -->
                     </div>
                 {/if}
             </div>
@@ -515,14 +570,10 @@
             ></div>
         </div>
     {/if}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+
     {#if activeSentence && viewMode === "sentence"}
         <div
-            class="sentence-panel absolute bottom-0 left-0 right-0 z-50
-            bg-white border-t border-zinc-200 shadow-[0_-4px_20px_-4px_rgba(0,0,0,0.1)]
-            rounded-t-2xl px-6 md:px-10 pt-3 pb-4
-            dark:bg-zinc-900 dark:border-zinc-800
-            flex flex-col"
+            class="sentence-panel absolute bottom-0 left-0 right-0 z-50 bg-white border-t border-zinc-200 shadow-[0_-4px_20px_-4px_rgba(0,0,0,0.1)] rounded-t-2xl px-6 md:px-10 pt-3 pb-4 dark:bg-zinc-900 dark:border-zinc-800 flex flex-col"
             style="max-height: 30vh;"
             transition:fly={{ y: 50, duration: 250 }}
             on:click|stopPropagation
@@ -574,7 +625,6 @@
         scrollbar-width: thin;
         scrollbar-color: rgba(24, 24, 27, 0.35) transparent;
     }
-
     :global(.dark) ::-webkit-scrollbar {
         width: 4px;
         height: 4px;

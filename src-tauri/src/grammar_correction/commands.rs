@@ -28,14 +28,12 @@ Strategy:
 1. PRESERVE MEANING: Do NOT rewrite valid sentences. Only fix objective errors.
 2. MAXIMIZE 'unchanged': Combine consecutive correct words into large blocks. Never split them.
 3. LOCAL EDITS: Use 'deleted' for extra words and 'inserted' for missing words. Avoid 'modified' unless a word form is wrong.
-4. PUNCTUATION: Fix punctuation using 'modified' on the preceding word.
 
 Example:
 Input: "После продолжительной встречи мы пошли в в столовую пообедали и вернулись офис."
 Output:
 [
-  {{"type": "unchanged", "original": "После продолжительной встречи мы пошли", "corrected": "После продолжительной встречи мы пошли"}},
-  {{"type": "unchanged", "original": "в", "corrected": "в"}},
+  {{"type": "unchanged", "original": "После продолжительной встречи мы пошли в", "corrected": "После продолжительной встречи мы пошли в"}},
   {{"type": "deleted", "original": "в", "corrected": null}},
   {{"type": "modified", "original": "столовую", "corrected": "столовую,"}},
   {{"type": "unchanged", "original": "пообедали и вернулись", "corrected": "пообедали и вернулись"}},

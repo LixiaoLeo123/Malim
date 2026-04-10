@@ -17,13 +17,13 @@ class TextResponse(BaseModel):
 
 
 CYRILLIC_LETTER_RE = re.compile(r'[\u0400-\u04FF]')
+PUNCTUATION_SPLIT_RE = re.compile(r'([.,;:!?\-—…«»""()\[\]])')
 
 def convert_plus_to_acute(text: str) -> str:
-#    vowels = set("аеёиоуыэюяАЕЁИОУЫЭЮЯ")
    result = []
    i = 0
    while i < len(text):
-       if text[i] == '+' and i + 1 < len(text):  # text[i + 1] in vowels
+       if text[i] == '+' and i + 1 < len(text):
            result.append(text[i + 1] + '\u0301')
            i += 2
        else:
@@ -33,7 +33,6 @@ def convert_plus_to_acute(text: str) -> str:
 
 def is_cyrillic_char(ch: str) -> bool:
     return bool(CYRILLIC_LETTER_RE.match(ch))
-
 
 def split_text_by_cyrillic(text: str) -> List[tuple]:
     if not text:
@@ -58,6 +57,36 @@ def split_text_by_cyrillic(text: str) -> List[tuple]:
     return fragments
 
 
+def process_cyrillic_with_fallback(text: str) -> str:
+    if not text.strip():
+        return text
+    
+    try:
+        return accentizer.process_all(text)
+    except Exception:
+        pass
+
+    parts = PUNCTUATION_SPLIT_RE.split(text)
+    res_parts = []
+    
+    for part in parts:
+        if not part:
+            continue
+        try:
+            res_parts.append(accentizer.process_all(part))
+        except Exception:
+            words = part.split(' ')
+            safe_words = []
+            for word in words:
+                try:
+                    safe_words.append(accentizer.process_all(word))
+                except Exception:
+                    safe_words.append(word)
+            res_parts.append(' '.join(safe_words))
+
+    return ''.join(res_parts)
+
+
 def accentize_text_safe(text: str, accentizer) -> str:
     if not text:
         return ""
@@ -66,7 +95,7 @@ def accentize_text_safe(text: str, accentizer) -> str:
 
     for frag, is_cyrillic in fragments:
         if is_cyrillic:
-            accented = accentizer.process_all(frag)
+            accented = process_cyrillic_with_fallback(frag)
             result_parts.append(accented)
         else:
             result_parts.append(frag)

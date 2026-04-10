@@ -29,6 +29,10 @@ impl DbState {
             "ALTER TABLE chat_logs ADD COLUMN grammar_corrections TEXT DEFAULT NULL",
             [],
         );
+        let _ = conn.execute(
+            "ALTER TABLE chat_logs ADD COLUMN parsed_content TEXT DEFAULT NULL",
+            [],
+        );
         conn.execute("INSERT OR IGNORE INTO global_memory (id) VALUES (1)", [])
             .map_err(|e| e.to_string())?;
         conn.execute("INSERT OR IGNORE INTO context_memory (id) VALUES (1)", [])
@@ -154,10 +158,10 @@ impl DbState {
     pub fn get_latest_logs(
         &self,
         limit: u32,
-    ) -> Result<Vec<(i64, String, String, String, Option<String>)>, String> {
+    ) -> Result<Vec<(i64, String, String, String, Option<String>, Option<String>)>, String> {
         let mut stmt = self.conn
-            .prepare("SELECT id, role, content, timestamp, grammar_corrections FROM chat_logs ORDER BY id DESC LIMIT ?")
-            .map_err(|e| e.to_string())?;
+        .prepare("SELECT id, role, content, timestamp, grammar_corrections, parsed_content FROM chat_logs ORDER BY id DESC LIMIT ?")
+        .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(params![limit], |row| {
                 Ok((
@@ -166,6 +170,7 @@ impl DbState {
                     row.get(2)?,
                     row.get(3)?,
                     row.get(4)?,
+                    row.get(5)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -176,11 +181,10 @@ impl DbState {
         &self,
         before_id: i64,
         limit: u32,
-    ) -> Result<Vec<(i64, String, String, String, Option<String>)>, String> {
+    ) -> Result<Vec<(i64, String, String, String, Option<String>, Option<String>)>, String> {
         let mut stmt = self.conn
-        .prepare("SELECT id, role, content, timestamp, grammar_corrections FROM chat_logs WHERE id < ? ORDER BY id DESC LIMIT ?")
+        .prepare("SELECT id, role, content, timestamp, grammar_corrections, parsed_content FROM chat_logs WHERE id < ? ORDER BY id DESC LIMIT ?")
         .map_err(|e| e.to_string())?;
-
         let rows = stmt
             .query_map(params![before_id, limit], |row| {
                 Ok((
@@ -189,10 +193,20 @@ impl DbState {
                     row.get::<_, String>(2)?,
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
-
         Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    pub fn update_parsed_content(&self, log_id: i64, parsed_json: String) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE chat_logs SET parsed_content = ?1 WHERE id = ?2",
+                params![parsed_json, log_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 }

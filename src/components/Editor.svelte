@@ -66,6 +66,9 @@
             sentences: existingArticle?.sentences || [],
             draftContent: contentSnapshot,
             language: languageSnapshot,
+            readProgress: existingArticle?.readProgress || 0,
+            completedCheckpointsList: existingArticle?.completedCheckpointsList || [],
+            stared: existingArticle?.stared || false,
         };
 
         if (isEditMode) {
@@ -76,7 +79,7 @@
             articles.update((items) => [newArticle, ...items]);
         }
 
-        editorDraft.set({ title: "", content: "", language: "KR" });
+        editorDraft.set({ title: "", content: "", language: "RU" });
         currentView.set("home");
         parsingQueue.update((q) => [...q, id]);
         processQueue();

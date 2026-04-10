@@ -72,6 +72,7 @@ export async function processQueue() {
             ruaccentEnabled: currentSettings.ruaccentEnabled,
             ruaccentUrl: currentSettings.ruaccentUrl,
             oldSentences: currentArticle.sentences || null,
+            showGrammarNotes: currentSettings.showGrammarNotes,
         });
 
         articles.update((items) =>

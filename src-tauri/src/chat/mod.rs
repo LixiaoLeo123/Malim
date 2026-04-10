@@ -6,7 +6,8 @@ pub mod vector;
 
 use ai::{
     call_embedding_api, call_shadow_ai, chat_completion, compress_context, merge_global_memory,
-    GrammarCorrection, MainAiResponse, MainAiResponseWithId, SYSTEM_PROMPT,
+    GrammarCorrection, MainAiResponse, MainAiResponseWithId, SYSTEM_PROMPT_END,
+    SYSTEM_PROMPT_START,
 };
 use chrono::Local;
 use db::DbState;
@@ -16,10 +17,10 @@ use token::count_tokens;
 use tokio::sync::Mutex;
 use vector::cosine_similarity;
 
-const MAX_TOTAL_TOKENS: usize = 400;
-const MAX_RAG_TOKENS: usize = 100;
-const MAX_RAG_APPEND_TOKENS: usize = 100; // token used to append new content with previous rag
-const MAX_USER_TOKENS: usize = 100;
+const MAX_TOTAL_TOKENS: usize = 4000;
+const MAX_RAG_TOKENS: usize = 1000;
+const MAX_RAG_APPEND_TOKENS: usize = 1000; // token used to append new content with previous rag
+const MAX_USER_TOKENS: usize = 500;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -28,6 +29,7 @@ pub struct ChatMessage {
     pub content: String,
     pub timestamp: String,
     pub grammar_corrections: Option<String>, // JSON string of Vec<GrammarCorrection>
+    pub parsed_content: Option<String>,      // JSON string of parsed content for grammar notes
 }
 
 #[derive(Serialize)]
@@ -101,6 +103,11 @@ impl MemoryHandler {
         }
     }
 
+    pub async fn update_parsed_content(&self, log_id: i64, parsed_content: String) -> Result<(), String> {
+        let db_lock = self.db.lock().await;
+        db_lock.update_parsed_content(log_id, parsed_content)
+    }
+
     pub async fn save_grammar(
         &self,
         log_id: i64,
@@ -144,7 +151,14 @@ impl MemoryHandler {
 
         let (summary, history) = Self::parse_context(&context_mem);
 
-        let mut total_tokens = count_tokens(SYSTEM_PROMPT)
+        let system_prompt_with_time = format!(
+            "{} Current time: {} {}",
+            SYSTEM_PROMPT_START,
+            Local::now().format("%Y-%m-%dT%H:%M:%S%:z"),
+            SYSTEM_PROMPT_END
+        );
+
+        let mut total_tokens = count_tokens(&system_prompt_with_time)
             + count_tokens(&global_mem)
             + count_tokens(&rag_text)
             + count_tokens(&summary)
@@ -159,7 +173,7 @@ impl MemoryHandler {
                 main_api.0,
                 main_api.1,
                 main_api.2,
-                SYSTEM_PROMPT,
+                &system_prompt_with_time,
                 &global_mem,
                 &rag_text,
                 &summary,
@@ -169,11 +183,12 @@ impl MemoryHandler {
             .await?;
 
             let ai_res = Self::parse_main_response(ai_content)?;
-
+            let mut ai_log_id = 0;  // 0 means no reply
             {
                 let db_lock = self.db.lock().await;
+
                 if !ai_res.reply.is_empty() {
-                    db_lock.append_log("assistant", &ai_res.reply)?;
+                    ai_log_id = db_lock.append_log_return_id("assistant", &ai_res.reply)?;
                     let new_ctx = Self::append_to_context(&context_mem, &user_input, &ai_res.reply);
                     db_lock.set_context(&new_ctx)?;
                 }
@@ -185,40 +200,91 @@ impl MemoryHandler {
                 proactive_time: ai_res.proactive_time,
                 proactive_message: ai_res.proactive_message,
                 user_log_id: user_log_id,
+                ai_log_id: ai_log_id,
             });
         }
 
-        let compress_future = compress_context(context_mem.clone(), shadow_api);
+        let (summary, history) = Self::parse_context(&context_mem);
+        let total_tokens = count_tokens(&context_mem);
+        let max_retain_tokens = total_tokens / 4; // 25% tokens for recent history, 75% for compression
+
+        let mut retained_history = Vec::new();
+        let mut retained_tokens = 0;
+
+        for (role, content) in history.iter().rev() {
+            let prefix = if role == "user" {
+                "User: "
+            } else {
+                "Assistant: "
+            };
+            let msg_tokens = count_tokens(&format!("{}{}", prefix, content));
+            if retained_tokens + msg_tokens <= max_retain_tokens {
+                retained_tokens += msg_tokens;
+                retained_history.push((role.clone(), content.clone()));
+            } else {
+                break;
+            }
+        }
+        retained_history.reverse();
+
+        let compress_len = history.len() - retained_history.len();
+        let mut to_compress_ctx = format!("[Summary]\n{}\n", summary);
+        if compress_len > 0 {
+            to_compress_ctx.push_str("[History]\n");
+            for (role, content) in &history[..compress_len] {
+                let prefix = if role == "user" {
+                    "User: "
+                } else {
+                    "Assistant: "
+                };
+                to_compress_ctx.push_str(&format!("{}{}\n", prefix, content));
+            }
+        }
+
+        let compress_future = compress_context(to_compress_ctx, shadow_api);
         let rag_future = self.generate_new_rag(context_mem.clone(), shadow_api, embed_api);
 
         let (comp_res, new_rag_data) = tokio::join!(compress_future, rag_future);
-        let comp_data = comp_res?;
+
+        let comp_res = comp_res?;
+
+        let mut final_context = format!("[Summary]\n{}\n", comp_res.temporary);
+        if !retained_history.is_empty() {
+            final_context.push_str("[History]\n");
+            for (role, content) in retained_history {
+                final_context.push_str(&format!(
+                    "{}: {}\n",
+                    if role == "user" { "User" } else { "Assistant" },
+                    content
+                ));
+            }
+        }
 
         let main_ai_future = chat_completion(
             main_api.0,
             main_api.1,
             main_api.2,
-            SYSTEM_PROMPT,
+            &system_prompt_with_time,
             &global_mem,
             &rag_text,
-            &comp_data.temporary,
+            &final_context,
             vec![],
             &user_input,
         );
 
         let update_global_future =
-            merge_global_memory(comp_data.permanent.clone(), global_mem.clone(), shadow_api);
+            merge_global_memory(comp_res.permanent.clone(), global_mem.clone(), shadow_api);
 
         let (ai_content, new_global_mem) = tokio::join!(main_ai_future, update_global_future);
         let ai_res = Self::parse_main_response(ai_content?)?;
-
+        let ai_log_id;
         {
             let db_lock = self.db.lock().await;
-            db_lock.append_log("assistant", &ai_res.reply)?;
+            ai_log_id = db_lock.append_log_return_id("assistant", &ai_res.reply)?;
 
             let new_ctx = format!(
                 "[Summary]\n{}\n[History]\nUser: {}\nAssistant: {}",
-                comp_data.temporary, user_input, ai_res.reply
+                final_context, user_input, ai_res.reply
             );
             db_lock.set_context(&new_ctx)?;
 
@@ -231,6 +297,7 @@ impl MemoryHandler {
             proactive_time: ai_res.proactive_time,
             proactive_message: ai_res.proactive_message,
             user_log_id: user_log_id,
+            ai_log_id: ai_log_id,
         })
     }
 
@@ -270,7 +337,7 @@ impl MemoryHandler {
         let mut tokens_used = 0;
         for (score, text) in scored {
             let t = count_tokens(&text);
-            if tokens_used + t > MAX_RAG_TOKENS {
+            if (tokens_used + t > MAX_RAG_TOKENS) || score <= 0.2 {
                 break;
             }
             dbg!(&score, &text);
@@ -415,13 +482,16 @@ impl MemoryHandler {
             .into_iter()
             .take(limit as usize)
             .rev()
-            .map(|(id, role, content, timestamp, grammar_json)| ChatMessage {
-                id,
-                role,
-                content,
-                timestamp,
-                grammar_corrections: grammar_json,
-            })
+            .map(
+                |(id, role, content, timestamp, grammar_json, parsed_json)| ChatMessage {
+                    id,
+                    role,
+                    content,
+                    timestamp,
+                    grammar_corrections: grammar_json,
+                    parsed_content: parsed_json,
+                },
+            )
             .collect();
         Ok(ChatLogsResponse { messages, has_more })
     }

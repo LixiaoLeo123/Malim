@@ -519,6 +519,69 @@ pub async fn record_word_click(app: AppHandle, lemma: String, clicked: bool) -> 
 }
 
 #[tauri::command]
+pub async fn record_unparsed_text_words(app: AppHandle, text: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let mut conn = init_db(&app)?;
+        let morph = {
+            let dict_path = rsmorphy_dict_ru::DICT_PATH;
+            let dict = Dictionary::from_file(dict_path);
+            MorphAnalyzer::new(dict)
+        };
+        let now = chrono::Local::now().timestamp();
+        
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+        for original_token in text.split_whitespace() {
+            let clean_word: String = original_token
+                .chars()
+                .filter(|c| c.is_alphabetic() || *c == '-')
+                .collect::<String>()
+                .to_lowercase();
+                
+            if clean_word.is_empty() { continue; }
+            
+            let parse_result = catch_unwind(AssertUnwindSafe(|| {
+                morph.parse(&clean_word)
+            }));
+
+            let lemma = match parse_result {
+                Ok(parsed_vec) => {
+                    match parsed_vec.first() {
+                        Some(p) => p.lex.get_lemma(&morph).to_string(),
+                        None => clean_word.clone(),
+                    }
+                }
+                Err(_) => {
+                    clean_word.clone()
+                }
+            };
+
+            let lemma = lemma.to_lowercase();
+            let contains_non_cyrillic = lemma.chars().any(|c| {
+                let cp = c as u32;
+                !(0x0400..=0x04FF).contains(&cp)
+            });
+            if contains_non_cyrillic { continue; }
+            if lemma.is_empty() { continue; }
+
+            // Ignore uniqueness constraint errors (we might insert same lemma twice or already clicked in the exact same second)
+            tx.execute(
+                "INSERT OR IGNORE INTO interactions (lemma, ts, clicked) VALUES (?1, ?2, 0)",
+                params![&lemma, now],
+            ).ok();
+
+            tx.execute(
+                "UPDATE word_stats SET last_ts = ?1, current_s = current_s * 0.5, dirty = 1 WHERE lemma = ?2", 
+                params![now, &lemma]
+            ).ok();
+        }
+        
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn run_global_calibration(app: AppHandle) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let mut conn = init_db(&app)?;

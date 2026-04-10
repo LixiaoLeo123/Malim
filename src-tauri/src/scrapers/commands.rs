@@ -5,6 +5,7 @@ use futures::future::join_all;
 use rand::prelude::SliceRandom;
 use serde::Deserialize;
 use tauri::{AppHandle, State};
+use rand::thread_rng;
 
 #[derive(Deserialize)]
 pub struct GetFeedRequest {
@@ -141,5 +142,7 @@ pub async fn get_feed(
         final_articles.push(a);
     }
     // dbg!(&final_articles);
+    let mut rng = thread_rng();
+    final_articles.shuffle(&mut rng);
     Ok(final_articles)
 }

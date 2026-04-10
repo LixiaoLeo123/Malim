@@ -2,8 +2,9 @@
 	import { onMount, tick } from "svelte";
 	import { fly, fade } from "svelte/transition";
 	import { invoke } from "@tauri-apps/api/core";
-	import { settings } from "../lib/stores";
+	import { currentView, settings } from "../lib/stores";
 	import { notifications } from "$lib/notificationStore";
+	import { playAudio, stopAudio } from "../lib/audio";
 
 	interface GrammarCorrection {
 		original: string | null;
@@ -16,6 +17,30 @@
 		proactive_time: string | null;
 		proactive_message: string | null;
 		user_log_id: number;
+		ai_log_id: number;
+	}
+
+	interface Block {
+		text: string;
+		pos: string;
+		definition: string;
+		chinese_root?: string;
+		grammar_note?: string;
+		audio_path?: string | null;
+		lemma?: string | null;
+		gram_case?: number | null;
+		gram_gender?: "m" | "f" | "n" | null;
+		gram_number?: "sg" | "pl" | null;
+		tense?: string | null;
+		aspect?: "pf" | "impf" | null;
+	}
+
+	interface Sentence {
+		id: string;
+		original: string;
+		blocks: Block[];
+		translation: string;
+		audio_path?: string | null;
 	}
 
 	interface ChatMessage {
@@ -27,8 +52,13 @@
 		grammarCorrections?: GrammarCorrection[] | null;
 		grammarStatus?: "checking" | "success" | "error";
 		dbLogId?: number;
+		parsedSentences?: Sentence[] | null;
+		parseStatus?: "parsing" | "done" | "error" | null;
+		detectedLang?: string;
+		quoteText?: string | null;
 	}
 
+	let aiNickname = $settings.aiNickname || "malim";
 	let messages: ChatMessage[] = [];
 	let inputText = "";
 	let isTyping = false;
@@ -40,6 +70,23 @@
 	let chatContainer: HTMLElement;
 	let isLoadingHistory = false;
 	let hasMoreHistory = true;
+	let firstLoad = true;
+
+	let activeParsedBlock: Block | null = null;
+	let activeParsedBlockEl: HTMLElement | null = null;
+	let activeParsedSentence: Sentence | null = null;
+
+	let unconsumedParsedMessages = new Set<number>();
+	let fullyConsumedMessageIds = new Set<number>();
+	let sessionLemmasByMsgId = new Map<number, Set<string>>();
+	let lastClickedBlock: Block | null = null;
+
+	let popoverPos = {
+		top: 0,
+		left: 0,
+		align: "bottom" as "top" | "bottom",
+		arrowLeft: 0,
+	};
 
 	let contextMenu = {
 		visible: false,
@@ -48,6 +95,238 @@
 		msgId: null as number | null,
 		position: "top" as "top" | "bottom",
 	};
+
+	function parseQuote(raw: string): { quote: string | null; text: string } {
+		const m = raw.match(/^\[quote\]([\s\S]*?)\[\/quote\]\n([\s\S]*)$/);
+		return m
+			? { quote: m[1].trim(), text: m[2] }
+			: { quote: null, text: raw };
+	}
+
+	let quotingMsg: ChatMessage | null = null;
+	function startQuote(msgId: number) {
+		closeContextMenu();
+		quotingMsg = messages.find((m) => m.id === msgId) || null;
+	}
+	function cancelQuote() {
+		quotingMsg = null;
+	}
+
+	function showContextMenu(
+		clientX: number,
+		msgId: number,
+		target: HTMLElement,
+	) {
+		const rect = target.getBoundingClientRect();
+		let pos: "top" | "bottom" = "top";
+		let targetY = rect.top - 12;
+		if (targetY < 80) {
+			pos = "bottom";
+			targetY = rect.bottom + 12;
+		}
+		contextMenu = {
+			visible: true,
+			x: clientX,
+			y: targetY,
+			msgId,
+			position: pos,
+		};
+	}
+
+	function detectLanguage(text: string): string {
+		let total = 0;
+		let cyrillic = 0,
+			hangul = 0,
+			kana = 0,
+			cjk = 0;
+		for (const char of text) {
+			const code = char.codePointAt(0)!;
+			if (code >= 0x0400 && code <= 0x04ff) {
+				cyrillic++;
+				total++;
+			} else if (
+				(code >= 0xac00 && code <= 0xd7af) ||
+				(code >= 0x1100 && code <= 0x11ff)
+			) {
+				hangul++;
+				total++;
+			} else if (
+				(code >= 0x3040 && code <= 0x309f) ||
+				(code >= 0x30a0 && code <= 0x30ff)
+			) {
+				kana++;
+				total++;
+			} else if (code >= 0x4e00 && code <= 0x9fff) {
+				cjk++;
+				total++;
+			}
+		}
+		if (total === 0) return "EN";
+		if (cyrillic / total > 0.3) return "RU";
+		if (hangul / total > 0.3) return "KR";
+		if (kana / total > 0.1 || cjk / total > 0.3) return "JP";
+		return "EN";
+	}
+
+	function getBlockPosClass(block: Block, lang?: string): string {
+		if (
+			lang === "RU" &&
+			(block.pos === "noun" || block.pos === "pronoun")
+		) {
+			if (block.gram_gender === "m") return "ru-gender-m";
+			if (block.gram_gender === "f") return "ru-gender-f";
+			if (block.gram_gender === "n") return "ru-gender-n";
+			return "pos-noun";
+		}
+		const map: Record<string, string> = {
+			noun: "pos-noun",
+			pronoun: "pos-pronoun",
+			verb: "pos-verb",
+			adjective: "pos-adjective",
+			adverb: "pos-adverb",
+			preposition: "pos-func",
+			conjunction: "pos-func",
+			particle: "pos-func",
+			ending: "pos-func",
+			punctuation: "pos-punct",
+			unknown: "pos-unknown",
+		};
+		return map[block.pos] || "pos-unknown";
+	}
+
+	async function parseMessage(msgId: number) {
+		closeContextMenu();
+		const mIdx = messages.findIndex((m) => m.id === msgId);
+		if (mIdx === -1) return;
+		const msg = messages[mIdx];
+		const lang = detectLanguage(msg.text);
+		msg.detectedLang = lang;
+		msg.parseStatus = "parsing";
+		// msg.parsedSentences = null;
+		messages = [...messages];
+
+		const id = $settings.defaultAiConfigId;
+		const config = id
+			? $settings.aiConfigList.find((c) => c.id === id)
+			: undefined;
+		if (!config) {
+			notifications.error("Please configure your API first.");
+			msg.parseStatus = "error";
+			messages = [...messages];
+			return;
+		}
+
+		try {
+			const result: Sentence[] = await invoke("parse_text", {
+				id: String(msg.dbLogId || msg.id),
+				text: msg.text,
+				language: lang,
+				apiKey: config.apiKey,
+				apiUrl: config.apiUrl,
+				modelName: config.modelName,
+				concurrency: $settings.concurrency,
+				ttsConcurrency: $settings.ttsConcurrency,
+				preCacheAudio: $settings.preCacheAudio,
+				ttsApi: $settings.ttsApi,
+				qwenApiKey: $settings.qwenApiKey,
+				qwenVoice: $settings.qwenVoice,
+				sileroTtsUrl: $settings.sileroUrl,
+				ruaccentEnabled: $settings.ruaccentEnabled,
+				ruaccentUrl: $settings.ruaccentUrl,
+				oldSentences: msg.parsedSentences || null,
+				showGrammarNotes: $settings.showGrammarNotes,
+			});
+
+			msg.parsedSentences = result;
+			msg.parseStatus = "done";
+			
+			unconsumedParsedMessages.add(msg.id);
+
+			if (msg.dbLogId) {
+				invoke("update_chat_parsed", {
+					logId: msg.dbLogId,
+					parsedContent: JSON.stringify(result),
+				}).catch((e) => console.error("Failed to save parsed:", e));
+			}
+			messages = [...messages];
+		} catch (e) {
+			console.error("Parse failed:", e);
+			msg.parseStatus = "error";
+			messages = [...messages];
+		}
+	}
+
+	function handleParsedBlockClick(
+		event: MouseEvent,
+		block: Block,
+		sentence: Sentence,
+		msgId: number,
+	) {
+		event.stopPropagation();
+		if (block.pos === "unknown" || block.pos === "punctuation") return;
+
+		// Record the click to backend, like Reader
+		if (block.lemma) {
+			let msgLemmas = sessionLemmasByMsgId.get(msgId) || new Set();
+			if (!msgLemmas.has(block.lemma)) {
+				msgLemmas.add(block.lemma);
+				sessionLemmasByMsgId.set(msgId, msgLemmas);
+				if ($settings.memoryModelEnabled && block.lemma !== lastClickedBlock?.lemma) {
+					invoke("record_word_click", {
+						lemma: block.lemma,
+						clicked: true,
+					});
+				}
+				lastClickedBlock = block;
+			}
+		}
+
+		if (activeParsedBlock === block) {
+			closeParsePopover();
+			return;
+		}
+		activeParsedBlock = block;
+		activeParsedBlockEl = event.currentTarget as HTMLElement;
+		activeParsedSentence = sentence;
+		calcPopoverPos();
+		if ($settings.autoSpeak && block.audio_path) {
+			playAudio(block.audio_path);
+		}
+	}
+
+	function handleSentenceClick(sentence: Sentence) {
+		if (sentence.audio_path) playAudio(sentence.audio_path);
+	}
+
+	function calcPopoverPos() {
+		if (!activeParsedBlockEl) return;
+		const rect = activeParsedBlockEl.getBoundingClientRect();
+		const sw = window.innerWidth;
+		const sh = window.innerHeight;
+		const pw = 264;
+		const as = 7;
+		let pl = rect.left;
+		if (pl + pw > sw - 12) pl = sw - pw - 12;
+		if (pl < 8) pl = 8;
+		const bc = rect.left + rect.width / 2;
+		let al = bc - pl - as;
+		al = Math.max(8, Math.min(pw - 20, al));
+		const below = sh - rect.bottom;
+		const top = below < 200;
+		popoverPos = {
+			left: pl,
+			top: top ? rect.top - 10 : rect.bottom + 10,
+			align: top ? "top" : "bottom",
+			arrowLeft: al,
+		};
+	}
+
+	function closeParsePopover() {
+		activeParsedBlock = null;
+		activeParsedBlockEl = null;
+		activeParsedSentence = null;
+		stopAudio();
+	}
 
 	function formatTime(ts: number): string {
 		const date = new Date(ts);
@@ -59,7 +338,10 @@
 			hour12: false,
 		});
 		if (isToday) return timeStr;
-		const dateStr = `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear().toString().slice(-2)}`;
+		const dateStr = `${date.getMonth() + 1}/${date.getDate()}/${date
+			.getFullYear()
+			.toString()
+			.slice(-2)}`;
 		return `${dateStr} ${timeStr}`;
 	}
 
@@ -130,10 +412,10 @@
 	async function loadHistory() {
 		if (isLoadingHistory || !hasMoreHistory) return;
 		isLoadingHistory = true;
-
-		// use the id of the topmost message to load earlier messages
-		const beforeId = messages.length > 0 ? messages[0].id : null;
-
+		const beforeId =
+			messages.length > 0
+				? (messages[0].dbLogId ?? messages[0].id)
+				: null;
 		try {
 			const res = await invoke<{
 				messages: Array<{
@@ -142,19 +424,19 @@
 					content: string;
 					timestamp: string;
 					grammar_corrections: string | null;
+					parsed_content: string | null;
 				}>;
 				has_more: boolean;
 			}>("get_chat_logs", { beforeId, limit: 20 });
-
 			hasMoreHistory = res.has_more;
-
 			if (res.messages && res.messages.length > 0) {
 				const oldScrollHeight = chatContainer
 					? chatContainer.scrollHeight
 					: 0;
 				const formattedLogs = res.messages.map((msg) => ({
 					id: msg.id,
-					text: msg.content,
+					dbLogId: msg.id,
+					text: parseQuote(msg.content).text,
 					isMine: msg.role === "user",
 					timestamp: new Date(msg.timestamp).getTime(),
 					status: "success" as const,
@@ -164,17 +446,25 @@
 					grammarStatus: msg.grammar_corrections
 						? ("success" as const)
 						: undefined,
+					parsedSentences: msg.parsed_content
+						? JSON.parse(msg.parsed_content)
+						: null,
+					parseStatus: msg.parsed_content ? ("done" as const) : null,
+					detectedLang: msg.parsed_content
+						? detectLanguage(msg.content)
+						: undefined,
+					quoteText: parseQuote(msg.content).quote,
 				}));
-
 				messages = [...formattedLogs, ...messages];
-
 				await tick();
 				if (chatContainer) {
 					if (beforeId === null) {
-						chatContainer.scrollTop = chatContainer.scrollHeight;
+						scrollToBottom();
 					} else {
-						 chatContainer.scrollTop =
-						 	chatContainer.scrollHeight - oldScrollHeight;
+						chatContainer.style.scrollBehavior = "auto";
+						chatContainer.scrollTop =
+							chatContainer.scrollHeight - oldScrollHeight;
+						chatContainer.style.scrollBehavior = "";
 					}
 				}
 			}
@@ -191,9 +481,14 @@
 		}
 	}
 
-	function handleBack() {}
+	function handleBack() {
+		$currentView = "home";
+	}
 
-	async function handleInput() {
+	async function handleInput(e: Event) {
+		const target = e.target as HTMLTextAreaElement;
+		target.style.height = "36px";
+		target.style.height = Math.min(target.scrollHeight, 150) + "px";
 		const match = inputText.match(/([a-zA-Z\s,']+)\?$/);
 		if (match) {
 			isTranslating = true;
@@ -214,22 +509,71 @@
 		resendId: number | null = null,
 	) {
 		if (!text.trim() && !resendId) return;
-		let msgId = resendId || Date.now();
 
+		// Consume all unclicked parsed words in current session
+		unconsumedParsedMessages.forEach((pMsgId) => {
+			const pMsg = messages.find((m) => m.id === pMsgId);
+            if (!pMsg || fullyConsumedMessageIds.has(pMsg.id)) return;
+
+			if (pMsg.parsedSentences) {
+				const msgLemmas = sessionLemmasByMsgId.get(pMsgId) || new Set();
+				
+				pMsg.parsedSentences.forEach((s) => {
+					s.blocks.forEach((b) => {
+						if (b.pos !== "unknown" && b.pos !== "punctuation" && b.lemma) {
+							if (!msgLemmas.has(b.lemma) && $settings.memoryModelEnabled) {
+								msgLemmas.add(b.lemma);
+								invoke("record_word_click", {
+									lemma: b.lemma,
+									clicked: false,
+								}).catch(console.error);
+							}
+						}
+					});
+				});
+				sessionLemmasByMsgId.set(pMsgId, msgLemmas);
+                fullyConsumedMessageIds.add(pMsgId);
+			} else if (!pMsg.parsedSentences && pMsg.detectedLang === "RU" && $settings.memoryModelEnabled) {
+				// Record unparsed Russian messages directly
+				invoke("record_unparsed_text_words", {
+					text: pMsg.text
+				}).catch(console.error);
+                fullyConsumedMessageIds.add(pMsgId);
+			}
+		});
+		unconsumedParsedMessages.clear();
+
+		let payload: string;
+		if (resendId) {
+			const originalMsg = messages.find((m) => m.id === resendId);
+			if (originalMsg?.quoteText) {
+				payload = `[quote]${originalMsg.quoteText.replace(/\[\/?quote\]/g, "")}[/quote]\n${text.trim()}`;
+			} else {
+				payload = text.trim();
+			}
+		} else if (quotingMsg) {
+			payload = `[quote]${quotingMsg.text.replace(/\[\/?quote\]/g, "")}[/quote]\n${text.trim()}`;
+		} else {
+			payload = text.trim();
+		}
+
+		let msgId = resendId || Date.now();
 		if (!resendId) {
 			messages = [
 				...messages,
 				{
 					id: msgId,
-					text: text.trim(),
+					text: text,
 					isMine: true,
 					timestamp: Date.now(),
 					status: "sending",
 					grammarStatus: "checking",
+					quoteText: quotingMsg ? quotingMsg.text : null,
 				},
 			];
 			inputText = "";
 			translationResult = "";
+			quotingMsg = null;
 			scrollToBottom();
 		} else {
 			let mIdx = messages.findIndex((m) => m.id === msgId);
@@ -238,27 +582,30 @@
 		}
 
 		isTyping = true;
-
-		apiSendMessage(text)
+		apiSendMessage(payload)
 			.then((aiRes) => {
 				isTyping = false;
 				let mIdx = messages.findIndex((m) => m.id === msgId);
 				if (mIdx === -1) return;
-
 				messages[mIdx].dbLogId = aiRes.user_log_id;
 				messages[mIdx].status = "success";
+				
+				const newAiMsgId = Date.now();
 				messages = [
 					...messages,
 					{
-						id: Date.now(),
+						id: newAiMsgId,
 						text: aiRes.reply,
 						isMine: false,
-						timestamp: Date.now(),
+						timestamp: newAiMsgId,
 						status: "success",
+						dbLogId: aiRes.ai_log_id,
+						detectedLang: detectLanguage(aiRes.reply)
 					},
 				];
+				unconsumedParsedMessages.add(newAiMsgId);
+				
 				scrollToBottom();
-
 				if (aiRes.proactive_time && aiRes.proactive_message) {
 					settings.update((s) => {
 						s.proactiveEvent = {
@@ -268,7 +615,6 @@
 						return s;
 					});
 				}
-
 				if (
 					messages[mIdx].grammarCorrections &&
 					messages[mIdx].grammarStatus === "success"
@@ -291,10 +637,8 @@
 			.then((grammarRes) => {
 				let mIdx = messages.findIndex((m) => m.id === msgId);
 				if (mIdx === -1) return;
-
 				messages[mIdx].grammarCorrections = grammarRes;
 				messages[mIdx].grammarStatus = "success";
-
 				if (messages[mIdx].dbLogId) {
 					apiSaveGrammar(messages[mIdx].dbLogId!, grammarRes).catch(
 						(e) => console.error(e),
@@ -331,7 +675,6 @@
 		if ($settings.proactiveEvent) {
 			const { time, message } = $settings.proactiveEvent;
 			const delay = new Date(time).getTime() - Date.now();
-
 			const fireProactive = async () => {
 				messages = [
 					...messages,
@@ -344,7 +687,6 @@
 					},
 				];
 				scrollToBottom();
-
 				try {
 					await invoke("trigger_proactive", {
 						message: message,
@@ -353,40 +695,22 @@
 				} catch (e) {
 					console.error("Failed to sync proactive msg:", e);
 				}
-
 				settings.update((s) => {
 					s.proactiveEvent = null;
 					return s;
 				});
 			};
-
 			if (delay <= 0) fireProactive();
 			else setTimeout(fireProactive, delay);
 		}
-
 		await loadHistory();
 	});
 
 	function onPointerDown(e: PointerEvent | TouchEvent, msgId: number) {
 		const target = e.currentTarget as HTMLElement;
-
 		pressTimer = window.setTimeout(() => {
 			const rect = target.getBoundingClientRect();
-			let pos: "top" | "bottom" = "top";
-			let targetY = rect.top - 12;
-
-			if (targetY < 80) {
-				pos = "bottom";
-				targetY = rect.bottom + 12;
-			}
-
-			contextMenu = {
-				visible: true,
-				x: rect.left + rect.width / 2,
-				y: targetY,
-				msgId,
-				position: pos,
-			};
+			showContextMenu(rect.left + rect.width / 2, msgId, target);
 		}, 500);
 	}
 
@@ -403,6 +727,19 @@
 		if (msg) navigator.clipboard.writeText(msg.text);
 		closeContextMenu();
 	}
+
+	$: if ($currentView === "chat" && chatContainer && firstLoad) {
+		tick().then(() => {
+			requestAnimationFrame(() => {
+				if (chatContainer) {
+					firstLoad = false;
+					chatContainer.style.scrollBehavior = "auto";
+					chatContainer.scrollTop = chatContainer.scrollHeight;
+					chatContainer.style.scrollBehavior = "";
+				}
+			});
+		});
+	}
 </script>
 
 <svelte:window
@@ -412,6 +749,12 @@
 			!(e.target as Element).closest(".context-menu")
 		)
 			closeContextMenu();
+		if (
+			activeParsedBlock &&
+			!(e.target as Element).closest(".parse-popover") &&
+			!(e.target as Element).closest(".word-block")
+		)
+			closeParsePopover();
 	}}
 />
 
@@ -432,7 +775,7 @@
 				<path d="M15 19l-7-7 7-7" />
 			</svg>
 		</button>
-		<div class="title">{isTyping ? "Typing..." : "malim"}</div>
+		<div class="title">{isTyping ? "Typing..." : aiNickname}</div>
 		<button class="icon-btn" on:click={() => (isDrawerOpen = true)}>
 			<svg viewBox="0 0 24 24" fill="currentColor">
 				<circle cx="5" cy="12" r="2.5" />
@@ -444,87 +787,217 @@
 
 	<main class="chat-area" bind:this={chatContainer} on:scroll={onChatScroll}>
 		{#each messages as msg, i (msg.id)}
-			<div class="msg-wrapper {msg.isMine ? 'mine' : 'theirs'}">
-				{#if i === 0 || msg.timestamp - messages[i - 1].timestamp > 5 * 60 * 1000}
-					<div class="timestamp">{formatTime(msg.timestamp)}</div>
-				{/if}
-				<div class="msg-content">
-					{#if !msg.isMine}
-						<img
-							src={$settings.aiAvatarUrl}
-							class="avatar"
-							alt="AI"
-						/>
+			{#if msg.text !== ""}
+				<div class="msg-wrapper {msg.isMine ? 'mine' : 'theirs'}">
+					{#if i === 0 || msg.timestamp - messages[i - 1].timestamp > 5 * 60 * 1000}
+						<div class="timestamp">{formatTime(msg.timestamp)}</div>
 					{/if}
+					<div class="msg-content">
+						{#if !msg.isMine}
+							<img
+								src={$settings.aiAvatarUrl}
+								class="avatar"
+								alt="AI"
+							/>
+						{/if}
+						{#if msg.isMine && msg.status === "error"}
+							<button
+								class="error-icon"
+								on:click={() => sendMessage(msg.text, msg.id)}
+							>
+								<svg viewBox="0 0 24 24" fill="var(--danger)">
+									<circle cx="12" cy="12" r="10" />
+									<path
+										d="M12 8v4m0 4h.01"
+										stroke="white"
+										stroke-width="2"
+										stroke-linecap="round"
+									/>
+								</svg>
+							</button>
+						{/if}
+						<div class="bubble-group">
+							{#if !msg.isMine && msg.parseStatus === "done" && msg.parsedSentences}
+								<div
+									class="bubble parsed-bubble"
+									on:pointerdown={(e) =>
+										onPointerDown(e, msg.id)}
+									on:pointerup={onPointerUp}
+									on:pointermove={onPointerUp}
+									on:pointercancel={onPointerUp}
+									on:contextmenu={(e) => {
+										e.preventDefault();
+										showContextMenu(
+											e.clientX,
+											msg.id,
+											e.currentTarget as HTMLElement,
+										);
+									}}
+								>
+									{#each msg.parsedSentences as sentence}
+										<div
+											class="parsed-sentence"
+											on:click={() =>
+												handleSentenceClick(sentence)}
+										>
+											<div class="parsed-words">
+												{#each sentence.blocks as block}
+													{#if block.pos === "punctuation"}
+														<span
+															class="word-block {getBlockPosClass(
+																block,
+																msg.detectedLang,
+															)}"
+															>{block.text}</span
+														>
+													{:else}
+														<button
+															class="word-block {getBlockPosClass(
+																block,
+																msg.detectedLang,
+															)}"
+															on:click|stopPropagation={(
+																e,
+															) =>
+																handleParsedBlockClick(
+																	e,
+																	block,
+																	sentence,
+																	msg.id,
+																)}
+														>
+															{block.text}
+															{#if msg.detectedLang === "RU" && (block.pos === "noun" || block.pos === "pronoun") && block.gram_case}
+																<sup
+																	class="case-sup"
+																	>{block.gram_case}</sup
+																>
+															{/if}
+														</button>
+													{/if}
+												{/each}
+											</div>
+											{#if sentence.translation}
+												<div
+													class="sentence-translation"
+												>
+													{sentence.translation}
+												</div>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							{:else if !msg.isMine && msg.parseStatus === "parsing"}
+								<div
+									class="bubble"
+									on:pointerdown={(e) =>
+										onPointerDown(e, msg.id)}
+									on:pointerup={onPointerUp}
+									on:pointermove={onPointerUp}
+									on:pointercancel={onPointerUp}
+									on:contextmenu={(e) => {
+										e.preventDefault();
+										showContextMenu(
+											e.clientX,
+											msg.id,
+											e.currentTarget as HTMLElement,
+										);
+									}}
+								>
+									<div class="parse-loading">
+										<span class="parse-spinner"></span>
+										Parsing...
+									</div>
+								</div>
+							{:else if !msg.isMine && msg.parseStatus === "error"}
+								<div
+									class="bubble"
+									on:pointerdown={(e) =>
+										onPointerDown(e, msg.id)}
+									on:pointerup={onPointerUp}
+									on:pointermove={onPointerUp}
+									on:pointercancel={onPointerUp}
+									on:contextmenu={(e) => {
+										e.preventDefault();
+										showContextMenu(
+											e.clientX,
+											msg.id,
+											e.currentTarget as HTMLElement,
+										);
+									}}
+								>
+									{msg.text}
+									<div class="parse-error-hint">
+										Parse failed · Long press to retry
+									</div>
+								</div>
+							{:else}
+								<div
+									class="bubble"
+									on:pointerdown={(e) =>
+										onPointerDown(e, msg.id)}
+									on:pointerup={onPointerUp}
+									on:pointermove={onPointerUp}
+									on:pointercancel={onPointerUp}
+									on:contextmenu={(e) => {
+										e.preventDefault();
+										showContextMenu(
+											e.clientX,
+											msg.id,
+											e.currentTarget as HTMLElement,
+										);
+									}}
+								>
+									{msg.text}
+								</div>
+							{/if}
+							{#if msg.quoteText}
+								<div class="quote-bubble">
+									<div class="quote-text">{msg.quoteText}</div>
+								</div>
+							{/if}
 
-					{#if msg.isMine && msg.status === "error"}
-						<button
-							class="error-icon"
-							on:click={() => sendMessage(msg.text, msg.id)}
-						>
-							<svg viewBox="0 0 24 24" fill="var(--danger)">
-								<circle cx="12" cy="12" r="10" />
-								<path
-									d="M12 8v4m0 4h.01"
-									stroke="white"
-									stroke-width="2"
-									stroke-linecap="round"
-								/>
-							</svg>
-						</button>
-					{/if}
-
-					<div class="bubble-group">
-						<div
-							class="bubble"
-							on:pointerdown={(e) => onPointerDown(e, msg.id)}
-							on:pointerup={onPointerUp}
-							on:pointermove={onPointerUp}
-							on:pointercancel={onPointerUp}
-						>
-							{msg.text}
+							{#if msg.isMine && msg.grammarStatus === "checking"}
+								<div class="grammar-check checking">
+									Checking...
+								</div>
+							{:else if msg.isMine && msg.grammarCorrections}
+								<div class="grammar-check result">
+									{#each msg.grammarCorrections as correction}
+										{#if correction.type === "unchanged"}
+											<span class="gc-block"
+												>{correction.corrected}</span
+											>{" "}
+										{:else if correction.type === "deleted"}
+											<span class="gc-block deleted"
+												>{correction.original}</span
+											>{" "}
+										{:else if correction.type === "modified"}
+											<span
+												class="gc-block modified"
+												title={correction.original ||
+													""}
+												>{correction.corrected}</span
+											>{" "}
+										{:else if correction.type === "inserted"}
+											<span class="gc-block inserted"
+												>{correction.corrected}</span
+											>{" "}
+										{/if}
+									{/each}
+								</div>
+							{/if}
 						</div>
-
-						{#if msg.isMine && msg.grammarStatus === "checking"}
-							<div class="grammar-check checking">
-								Checking...
-							</div>
-						{:else if msg.isMine && msg.grammarCorrections}
-							<div class="grammar-check result">
-								{#each msg.grammarCorrections as correction}
-									{#if correction.type === "unchanged"}
-										<span class="gc-block"
-											>{correction.corrected}</span
-										>
-									{:else if correction.type === "deleted"}
-										<span class="gc-block deleted"
-											>{correction.original}</span
-										>
-									{:else if correction.type === "modified"}
-										<span
-											class="gc-block modified"
-											title={correction.original || ""}
-											>{correction.corrected}</span
-										>
-									{:else if correction.type === "inserted"}
-										<span class="gc-block inserted"
-											>{correction.corrected}</span
-										>
-									{/if}
-								{/each}
-							</div>
+						{#if msg.isMine}
+							<img
+								src={$settings.userAvatarUrl}
+								class="avatar"
+								alt="You"
+							/>
 						{/if}
 					</div>
-
-					{#if msg.isMine}
-						<img
-							src={$settings.userAvatarUrl}
-							class="avatar"
-							alt="You"
-						/>
-					{/if}
 				</div>
-			</div>
+			{/if}
 		{/each}
 	</main>
 
@@ -537,15 +1010,27 @@
 				<span class="lang-tag">RU</span>{translationResult}
 			</div>
 		{/if}
+		{#if quotingMsg}
+			<div class="quote-input-bar">
+				<div class="quote-input-text">{quotingMsg.text}</div>
+				<button class="quote-input-cancel" on:click={cancelQuote}
+					>✕</button
+				>
+			</div>
+		{/if}
 		<div class="input-wrapper">
-			<input
-				type="text"
+			<textarea
 				bind:value={inputText}
 				on:input={handleInput}
 				on:keydown={(e) => {
-					if (e.key === "Enter") sendMessage();
+					if (e.key === "Enter" && !e.shiftKey) {
+						e.preventDefault();
+						sendMessage();
+					}
 				}}
-			/>
+				placeholder="Message"
+				rows="1"
+			></textarea>
 			{#if inputText.trim().length > 0}
 				<button
 					class="send-btn"
@@ -573,14 +1058,58 @@
 					stroke-linecap="round"
 					stroke-linejoin="round"
 				>
-					<rect x="9" y="9" width="13" height="13" rx="2" ry="2"
-					></rect>
+					<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
 					<path
 						d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-					></path>
+					/>
 				</svg>
 				<span>Copy</span>
 			</button>
+			<button
+				class="context-item"
+				on:click={() => startQuote(contextMenu.msgId!)}
+			>
+				<svg
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				>
+					<polyline points="9 17 4 12 9 7"></polyline>
+					<path d="M20 18v-2a4 4 0 0 0-4-4H4"></path>
+				</svg>
+				<span>Quote</span>
+			</button>
+			{#if !messages.find((m) => m.id === contextMenu.msgId)?.isMine}
+				<div class="divider"></div>
+				<button
+					class="context-item"
+					on:click={() => parseMessage(contextMenu.msgId!)}
+				>
+					<svg
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<path
+							d="M4 7V4a2 2 0 0 1 2-2h8.5L20 7.5V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"
+						/>
+						<polyline points="14 2 14 8 20 8" />
+						<path d="M9 15l2 2 4-4" />
+					</svg>
+					<span
+						>{messages.find((m) => m.id === contextMenu.msgId)
+							?.parseStatus === "done"
+							? "Re-parse"
+							: "Parse"}</span
+					>
+				</button>
+			{/if}
 			{#if messages.find((m) => m.id === contextMenu.msgId)?.isMine}
 				<div class="divider"></div>
 				<button
@@ -597,13 +1126,78 @@
 					>
 						<path
 							d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"
-						></path>
-						<polygon points="18 2 22 6 12 16 8 16 8 12 18 2"
-						></polygon>
+						/>
+						<polygon points="18 2 22 6 12 16 8 16 8 12 18 2" />
 					</svg>
 					<span>Grammar</span>
 				</button>
 			{/if}
+		</div>
+	{/if}
+
+	{#if activeParsedBlock}
+		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+		<div
+			class="parse-popover"
+			style="
+        left: {popoverPos.left}px;
+        top: {popoverPos.top}px;
+        transform: translateY({popoverPos.align === 'top' ? '-100%' : '0'});
+      "
+			transition:fade={{ duration: 130 }}
+			on:click|stopPropagation
+		>
+			<div class="popover-inner">
+				{#if activeParsedBlock.chinese_root}
+					<span class="popover-tag root-tag"
+						>[{activeParsedBlock.chinese_root}]</span
+					>
+				{/if}
+
+				<div class="popover-def">{activeParsedBlock.definition}</div>
+
+				{#if activeParsedBlock.lemma}
+					<div class="text-sm text-zinc-300 mt-1">
+						Lemma: <span class="font-semibold"
+							>{activeParsedBlock.lemma}</span
+						>
+					</div>
+				{/if}
+
+				{#if activeParsedBlock.grammar_note}
+					<div class="popover-note">
+						{activeParsedBlock.grammar_note}
+					</div>
+				{/if}
+
+				<div class="popover-tags">
+					{#if activeParsedBlock.tense}
+						<span class="popover-tag tense-tag"
+							>{activeParsedBlock.tense}</span
+						>
+					{/if}
+					{#if activeParsedBlock.aspect}
+						<span
+							class="popover-tag aspect-tag {activeParsedBlock.aspect ===
+							'pf'
+								? 'pf'
+								: 'impf'}"
+						>
+							{activeParsedBlock.aspect === "pf" ? "PF" : "IPF"}
+						</span>
+					{/if}
+					{#if activeParsedBlock.gram_number === "pl"}
+						<span class="popover-tag plural-tag">PL</span>
+					{/if}
+				</div>
+			</div>
+			<div
+				class="popover-arrow"
+				style="
+          left: {popoverPos.arrowLeft}px;
+          {popoverPos.align === 'top' ? 'bottom: -6px;' : 'top: -6px;'}
+        "
+			></div>
 		</div>
 	{/if}
 
@@ -634,6 +1228,18 @@
 					placeholder="Leave empty for default"
 				/>
 			</div>
+			<div class="setting-item">
+				<label>AI Nickname</label>
+				<input
+					type="text"
+					bind:value={aiNickname}
+					on:change={() =>
+						settings.update((s) => {
+							s.aiNickname = aiNickname;
+							return s;
+						})}
+				/>
+			</div>
 		</div>
 	{/if}
 </div>
@@ -644,22 +1250,22 @@
 		--topbar-bg: #f7f7f7;
 		--bottombar-bg: #f7f7f7;
 		--border-color: #e5e5e5;
-
 		--text-primary: #000000;
 		--text-secondary: #999999;
-
 		--bubble-mine: #8aec5f;
 		--bubble-mine-text: #000000;
 		--bubble-theirs: #efefef;
 		--bubble-theirs-text: #000000;
-
 		--input-bg: #ffffff;
 		--accent: #05c160;
 		--danger: #fa5151;
-
 		--context-bg: #4c4c4c;
 		--context-text: #ffffff;
 		--drawer-bg: #f2f2f2;
+		--popover-bg: #1e1e1e;
+		--popover-text: #ffffff;
+		--popover-muted: #a1a1aa;
+		--popover-border: rgba(255, 255, 255, 0.08);
 	}
 
 	@media (prefers-color-scheme: dark) {
@@ -668,18 +1274,19 @@
 			--topbar-bg: #1e1e1e;
 			--bottombar-bg: #1e1e1e;
 			--border-color: #000000;
-
 			--text-primary: #ffffff;
 			--text-secondary: #888888;
-
 			--bubble-mine: #24b671;
 			--bubble-mine-text: #000000;
 			--bubble-theirs: #1b1a1b;
 			--bubble-theirs-text: #ffffff;
-
 			--input-bg: #2c2c2c;
 			--context-bg: #333333;
 			--drawer-bg: #111111;
+			--popover-bg: #2a2a2a;
+			--popover-text: #f0f0f0;
+			--popover-muted: #888;
+			--popover-border: rgba(255, 255, 255, 0.06);
 		}
 	}
 
@@ -732,6 +1339,7 @@
 		width: 24px;
 		height: 24px;
 	}
+
 	.title {
 		font-size: 17px;
 		font-weight: 600;
@@ -745,6 +1353,8 @@
 		flex-direction: column;
 		gap: 20px;
 		scroll-behavior: smooth;
+		-webkit-overflow-scrolling: touch;
+		overscroll-behavior-y: contain;
 	}
 
 	.msg-wrapper {
@@ -765,11 +1375,14 @@
 		width: 100%;
 		align-items: flex-start;
 		gap: 12px;
+		min-width: 0;
+		overflow: hidden;
 	}
 
 	.mine .msg-content {
 		justify-content: flex-end;
 	}
+
 	.theirs .msg-content {
 		justify-content: flex-start;
 	}
@@ -786,10 +1399,47 @@
 	.bubble-group {
 		display: flex;
 		flex-direction: column;
-		max-width: 68%;
+		max-width: 75%;
 		gap: 4px;
+		min-width: 0;
+		overflow: hidden;
+	}
+	.mine .bubble-group {
+		align-items: flex-end;
+	}
+	.theirs .bubble-group {
+		align-items: flex-start;
+	}
+	.quote-bubble {
+		width: 0;
+		min-width: 100%;
+		border-radius: 8px;
+		background-color: rgba(0, 0, 0, 0.05);
+		padding: 8px 12px;
+		margin-top: 6px;
+		box-sizing: border-box;
+
+		font-size: 12px;
+		color: var(--text-secondary);
+	}
+	.quote-text {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: normal;
+		overflow-wrap: break-word;
+		word-break: break-word;
+		line-height: 1.4;
 	}
 
+	@media (prefers-color-scheme: dark) {
+		.quote-bubble {
+			background-color: rgba(255, 255, 255, 0.1);
+		}
+	}
 	.bubble {
 		position: relative;
 		padding: 10px 14px;
@@ -803,15 +1453,14 @@
 	.mine .bubble {
 		background-color: var(--bubble-mine);
 		color: var(--bubble-mine-text);
-		border-radius: 8px 8px 8px 8px;
+		border-radius: 8px;
 	}
 
 	.theirs .bubble {
 		background-color: var(--bubble-theirs);
 		color: var(--bubble-theirs-text);
-		border-radius: 8px 8px 8px 8px;
+		border-radius: 8px;
 	}
-
 
 	.bubble::before {
 		content: "";
@@ -832,6 +1481,201 @@
 		border-color: transparent var(--bubble-theirs) transparent transparent;
 	}
 
+	/* ---------- Parsed bubble ---------- */
+	.parsed-bubble {
+		background-color: transparent !important;
+		padding: 6px 4px !important;
+		line-height: 1.8;
+	}
+
+	.parsed-bubble::before {
+		display: none !important;
+	}
+
+	.parsed-sentence {
+		margin-bottom: 6px;
+		cursor: pointer;
+		border-radius: 8px;
+		padding: 4px 6px;
+		transition: background-color 0.15s;
+	}
+
+	.parsed-sentence:last-child {
+		margin-bottom: 0;
+	}
+
+	.parsed-sentence:active {
+		background-color: rgba(128, 128, 128, 0.1);
+	}
+
+	.parsed-words {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0;
+	}
+
+	.word-block {
+		display: inline-block;
+		padding: 1px 4px;
+		margin: 0 0.5px;
+		border-radius: 4px;
+		font-size: inherit;
+		line-height: inherit;
+		transition:
+			transform 0.075s ease-out,
+			filter 0.15s;
+		border: none;
+		background: none;
+		cursor: pointer;
+		font-family: inherit;
+		position: relative;
+	}
+
+	.word-block:active {
+		transform: scale(0.93);
+	}
+
+	.case-sup {
+		font-size: 9px;
+		margin-left: 1px;
+		opacity: 0.6;
+		font-weight: 600;
+	}
+
+	.sentence-translation {
+		font-size: 12px;
+		color: var(--text-secondary);
+		padding: 2px 6px 0;
+		line-height: 1.4;
+		font-style: italic;
+	}
+
+	/* ---- POS colors (light) ---- */
+	.pos-noun {
+		background-color: rgba(59, 130, 246, 0.13);
+		color: #1d4ed8;
+	}
+	.pos-pronoun {
+		background-color: rgba(99, 102, 241, 0.13);
+		color: #4338ca;
+	}
+	.pos-verb {
+		background-color: rgba(239, 68, 68, 0.13);
+		color: #b91c1c;
+	}
+	.pos-adjective {
+		background-color: rgba(245, 158, 11, 0.13);
+		color: #b45309;
+	}
+	.pos-adverb {
+		background-color: rgba(16, 185, 129, 0.13);
+		color: #047857;
+	}
+	.pos-func {
+		background-color: rgba(156, 163, 175, 0.15);
+		color: #4b5563;
+	}
+	.pos-punct {
+		background-color: transparent;
+		color: var(--text-secondary);
+		cursor: default;
+		padding: 1px 1px;
+	}
+	.pos-unknown {
+		background-color: rgba(100, 116, 139, 0.1);
+		color: #64748b;
+	}
+
+	/* Russian gender overrides */
+	.ru-gender-m {
+		background-color: rgba(139, 92, 246, 0.13);
+		color: #6d28d9;
+	}
+	.ru-gender-f {
+		background-color: rgba(6, 182, 212, 0.13);
+		color: #0e7490;
+	}
+	.ru-gender-n {
+		background-color: rgba(59, 130, 246, 0.13);
+		color: #1d4ed8;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.pos-noun {
+			background-color: rgba(59, 130, 246, 0.22);
+			color: #93c5fd;
+		}
+		.pos-pronoun {
+			background-color: rgba(99, 102, 241, 0.22);
+			color: #a5b4fc;
+		}
+		.pos-verb {
+			background-color: rgba(239, 68, 68, 0.22);
+			color: #fca5a5;
+		}
+		.pos-adjective {
+			background-color: rgba(245, 158, 11, 0.22);
+			color: #fcd34d;
+		}
+		.pos-adverb {
+			background-color: rgba(16, 185, 129, 0.22);
+			color: #6ee7b7;
+		}
+		.pos-func {
+			background-color: rgba(156, 163, 175, 0.18);
+			color: #d1d5db;
+		}
+		.pos-unknown {
+			background-color: rgba(100, 116, 139, 0.18);
+			color: #94a3b8;
+		}
+		.ru-gender-m {
+			background-color: rgba(139, 92, 246, 0.22);
+			color: #c4b5fd;
+		}
+		.ru-gender-f {
+			background-color: rgba(6, 182, 212, 0.22);
+			color: #67e8f9;
+		}
+		.ru-gender-n {
+			background-color: rgba(59, 130, 246, 0.22);
+			color: #93c5fd;
+		}
+	}
+
+	/* Parse loading */
+	.parse-loading {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		opacity: 0.6;
+		font-size: 14px;
+	}
+
+	.parse-spinner {
+		width: 14px;
+		height: 14px;
+		border: 2px solid transparent;
+		border-top-color: currentColor;
+		border-radius: 50%;
+		animation: spin 0.6s linear infinite;
+	}
+
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	.parse-error-hint {
+		font-size: 11px;
+		color: var(--danger);
+		margin-top: 6px;
+		opacity: 0.8;
+	}
+
+	/* ---------- Grammar check ---------- */
 	.grammar-check {
 		font-size: 12px;
 		padding: 6px 10px;
@@ -839,10 +1683,11 @@
 		border-radius: 6px;
 		color: var(--text-primary);
 		align-self: flex-end;
-		display: flex;
+		/* display: flex;
 		flex-wrap: wrap;
-		gap: 3px;
+		gap: 0.3em; */
 	}
+
 	@media (prefers-color-scheme: dark) {
 		.grammar-check {
 			background-color: rgba(255, 255, 255, 0.1);
@@ -853,19 +1698,23 @@
 		font-style: italic;
 		opacity: 0.7;
 	}
+
 	.gc-block.deleted {
 		text-decoration: line-through;
 		color: var(--danger);
 	}
+
 	.gc-block.modified {
 		border-bottom: 2px dashed #ffd700;
 		color: #d4a017;
 	}
+
 	@media (prefers-color-scheme: dark) {
 		.gc-block.modified {
 			color: #ffd700;
 		}
 	}
+
 	.gc-block.inserted {
 		color: var(--accent);
 		text-decoration: underline;
@@ -882,11 +1731,47 @@
 	}
 
 	.bottom-bar {
+		width: 100%;
+		box-sizing: border-box;
 		background-color: var(--bottombar-bg);
 		border-top: 0.5px solid var(--border-color);
 		padding: 6px 16px;
 		padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
 		position: relative;
+	}
+
+	.quote-input-bar {
+		display: flex;
+		align-items: center;
+		background-color: var(--input-bg);
+		border-radius: 4px;
+		padding: 8px 10px;
+		margin-bottom: 6px;
+		border-left: 3px solid var(--accent);
+		width: 100%;
+		max-width: 100%;
+		overflow: hidden;
+	}
+
+	.quote-input-text {
+		flex: 1;
+		min-width: 0;
+		width: 0;
+		font-size: 13px;
+		color: var(--text-secondary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.quote-input-cancel {
+		background: none;
+		border: none;
+		color: var(--text-secondary);
+		cursor: pointer;
+		padding: 0 0 0 8px;
+		font-size: 14px;
+		flex-shrink: 0;
 	}
 
 	.translation-popup {
@@ -919,16 +1804,26 @@
 		gap: 12px;
 	}
 
-	input[type="text"] {
+	.input-wrapper textarea {
 		flex: 1;
 		background-color: var(--input-bg);
 		border: none;
 		color: var(--text-primary);
-		padding: 0 12px;
-		height: 36px;
+		padding: 8px 12px;
 		border-radius: 4px;
 		font-size: 16px;
 		outline: none;
+		resize: none;
+		height: 36px;
+		min-height: 36px;
+		max-height: 150px;
+		line-height: 1.4;
+		overflow-y: auto;
+		font-family: inherit;
+		white-space: pre-wrap;
+		word-wrap: break-word;
+		word-break: break-word;
+		box-sizing: border-box;
 	}
 
 	.send-btn {
@@ -943,6 +1838,7 @@
 		cursor: pointer;
 	}
 
+	/* ---------- Context menu ---------- */
 	.context-menu {
 		position: fixed;
 		background-color: var(--context-bg);
@@ -958,6 +1854,7 @@
 	.context-menu.pos-top {
 		transform: translate(-50%, -100%);
 	}
+
 	.context-menu.pos-bottom {
 		transform: translate(-50%, 0);
 	}
@@ -969,10 +1866,12 @@
 		transform: translateX(-50%);
 		border: 6px solid transparent;
 	}
+
 	.context-menu.pos-top::after {
 		top: 100%;
 		border-top-color: var(--context-bg);
 	}
+
 	.context-menu.pos-bottom::after {
 		bottom: 100%;
 		border-bottom-color: var(--context-bg);
@@ -993,9 +1892,11 @@
 		cursor: pointer;
 		border-radius: 6px;
 	}
+
 	.context-item:active {
 		background-color: rgba(255, 255, 255, 0.1);
 	}
+
 	.context-item svg {
 		width: 22px;
 		height: 22px;
@@ -1007,6 +1908,104 @@
 		margin: 4px 4px;
 	}
 
+	/* ---------- Parse popover ---------- */
+	.parse-popover {
+		position: fixed;
+		z-index: 150;
+		width: 264px;
+		background-color: var(--popover-bg);
+		color: var(--popover-text);
+		border-radius: 14px;
+		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+		overflow: visible;
+	}
+
+	.popover-inner {
+		padding: 12px 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.popover-def {
+		font-size: 16px;
+		font-weight: 700;
+		line-height: 1.3;
+	}
+
+	.popover-note {
+		font-size: 13px;
+		color: var(--popover-muted);
+		line-height: 1.4;
+		border-top: 1px solid var(--popover-border);
+		padding-top: 6px;
+		margin-top: 2px;
+	}
+
+	.popover-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		margin-top: 2px;
+	}
+
+	.popover-tag {
+		display: inline-block;
+		font-size: 10px;
+		font-weight: 600;
+		padding: 2px 6px;
+		border-radius: 4px;
+		letter-spacing: 0.02em;
+	}
+
+	.root-tag {
+		background-color: rgba(234, 179, 8, 0.2);
+		color: #facc15;
+		border: 1px solid rgba(234, 179, 8, 0.4);
+		align-self: flex-start;
+	}
+
+	.tense-tag {
+		background-color: rgba(59, 130, 246, 0.18);
+		color: #60a5fa;
+		border: 1px solid rgba(59, 130, 246, 0.35);
+	}
+
+	.aspect-tag.pf {
+		background-color: rgba(249, 115, 22, 0.18);
+		color: #fb923c;
+		border: 1px solid rgba(249, 115, 22, 0.35);
+	}
+
+	.aspect-tag.impf {
+		background-color: rgba(6, 182, 212, 0.18);
+		color: #22d3ee;
+		border: 1px solid rgba(6, 182, 212, 0.35);
+	}
+
+	.plural-tag {
+		background-color: rgba(168, 85, 247, 0.2);
+		color: #c084fc;
+		border: 1px solid rgba(168, 85, 247, 0.35);
+	}
+
+	.lemma-tag {
+		background-color: rgba(255, 255, 255, 0.08);
+		color: var(--popover-muted);
+		border: 1px solid var(--popover-border);
+		font-weight: 500;
+	}
+
+	.popover-arrow {
+		position: absolute;
+		width: 12px;
+		height: 12px;
+		background-color: var(--popover-bg);
+		transform: rotate(45deg);
+		border-radius: 2px;
+	}
+
+	/* ---------- Drawer ---------- */
 	.drawer-overlay {
 		position: fixed;
 		top: 0;
@@ -1042,6 +2041,7 @@
 		font-size: 18px;
 		margin: 0;
 	}
+
 	.drawer-header button {
 		background: none;
 		border: none;
@@ -1055,10 +2055,12 @@
 		flex-direction: column;
 		gap: 8px;
 	}
+
 	.setting-item label {
 		font-size: 14px;
 		color: var(--text-secondary);
 	}
+
 	.setting-item input {
 		background-color: var(--input-bg);
 		border: 1px solid var(--border-color);
@@ -1066,5 +2068,10 @@
 		padding: 12px;
 		border-radius: 6px;
 		outline: none;
+	}
+	@media (prefers-color-scheme: dark) {
+		.quote-bubble {
+			background-color: rgba(255, 255, 255, 0.08);
+		}
 	}
 </style>
