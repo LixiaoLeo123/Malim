@@ -156,8 +156,8 @@
                 lang: currentLang,
             });
             selectedSourceIds = new Set(sources.map((s) => s.id));
-            if (articles.length > 0) {
-                fetchFeed(false);
+            if (false) { // DISABLED AUTO FETCH
+                // fetchFeed(false);
             }
         } catch (error) {
             console.error("Failed to load sources:", error);
@@ -173,7 +173,7 @@
             await invoke("clear_emitted_urls");
             articles = [];
             layoutClasses = [];
-            fetchFeed(false);
+            // fetchFeed(false);
         } catch (error) {
             console.error("Failed to reset feed:", error);
         } finally {
@@ -213,8 +213,8 @@
         }
     }
 
-    function initialFetch() {
-        fetchFeed(false);
+    function initialFetch() { fetchFeed(false);
+        // fetchFeed(false);
     }
 
 
@@ -250,7 +250,7 @@
 
     function handleTouchEnd(e: TouchEvent) {
         const touchEndY = e.changedTouches[0].clientY;
-        if (touchEndY - touchStartY > 50) {
+        if (touchStartY - touchEndY > 20) {
             triggerFetch();
         }
     }
@@ -262,15 +262,15 @@
             selectedSourceIds.add(id);
         }
         selectedSourceIds = selectedSourceIds;
-        if (articles.length > 0) {
-            fetchFeed(false);
+        if (false) { // DISABLED AUTO FETCH
+            // fetchFeed(false);
         }
     }
 
     function toggleFamiliarity() {
         markFamiliarity = !markFamiliarity;
-        if (articles.length > 0) {
-            fetchFeed(false);
+        if (false) { // DISABLED AUTO FETCH
+            // fetchFeed(false);
         }
     }
 

@@ -431,7 +431,7 @@
                                         </button>
                                     {:else}
                                         <button 
-                                            class="p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all text-zinc-300 hover:text-zinc-500 dark:text-zinc-600 dark:hover:text-zinc-400"
+                                            class="p-1 rounded-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all text-zinc-300 hover:text-zinc-500 dark:text-zinc-500 dark:hover:text-zinc-400"
                                             on:click|stopPropagation={() => toggleStar(article.id)}
                                         >
                                             <Star size={13} />
