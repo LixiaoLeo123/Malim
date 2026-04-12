@@ -1,6 +1,7 @@
 use crate::chat::ChatLogsResponse;
 use crate::chat::GrammarCorrection;
 use crate::chat::MainAiResponseWithId;
+use crate::chat::TokenLimits;
 use crate::AppState;
 use tauri::State;
 
@@ -37,6 +38,10 @@ pub async fn send_message(
     embed_api_key: String,
     embed_api_url: String,
     embed_model_name: String,
+    max_total_tokens: Option<u32>,
+    max_rag_tokens: Option<u32>,
+    max_rag_append_tokens: Option<u32>,
+    max_user_tokens: Option<u32>,
 ) -> Result<MainAiResponseWithId, String> {
     let handler = &state.memory_handler;
     let main_api = (
@@ -54,9 +59,15 @@ pub async fn send_message(
         embed_api_url.as_str(),
         embed_model_name.as_str(),
     );
+    let token_limits = TokenLimits::from_input(
+        max_total_tokens,
+        max_rag_tokens,
+        max_rag_append_tokens,
+        max_user_tokens,
+    );
 
     let result = handler
-        .handle_message(user_input, main_api, shadow_api, embed_api)
+        .handle_message(user_input, main_api, shadow_api, embed_api, token_limits)
         .await;
     dbg!(&result);
     result

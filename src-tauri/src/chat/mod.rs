@@ -17,10 +17,74 @@ use token::count_tokens;
 use tokio::sync::Mutex;
 use vector::cosine_similarity;
 
-const MAX_TOTAL_TOKENS: usize = 4000;
-const MAX_RAG_TOKENS: usize = 1000;
-const MAX_RAG_APPEND_TOKENS: usize = 1000; // token used to append new content with previous rag
-const MAX_USER_TOKENS: usize = 500;
+const DEFAULT_MAX_TOTAL_TOKENS: usize = 4000;
+const DEFAULT_MAX_RAG_TOKENS: usize = 1000;
+const DEFAULT_MAX_RAG_APPEND_TOKENS: usize = 1000; // token used to append new content with previous rag
+const DEFAULT_MAX_USER_TOKENS: usize = 500;
+
+#[derive(Debug, Clone, Copy)]
+pub struct TokenLimits {
+    pub max_total_tokens: usize,
+    pub max_rag_tokens: usize,
+    pub max_rag_append_tokens: usize,
+    pub max_user_tokens: usize,
+}
+
+impl Default for TokenLimits {
+    fn default() -> Self {
+        Self {
+            max_total_tokens: DEFAULT_MAX_TOTAL_TOKENS,
+            max_rag_tokens: DEFAULT_MAX_RAG_TOKENS,
+            max_rag_append_tokens: DEFAULT_MAX_RAG_APPEND_TOKENS,
+            max_user_tokens: DEFAULT_MAX_USER_TOKENS,
+        }
+    }
+}
+
+impl TokenLimits {
+    pub fn from_input(
+        max_total_tokens: Option<u32>,
+        max_rag_tokens: Option<u32>,
+        max_rag_append_tokens: Option<u32>,
+        max_user_tokens: Option<u32>,
+    ) -> Self {
+        let defaults = Self::default();
+
+        // Keep limits in a safe range
+        let max_total = max_total_tokens
+            .map(|v| v as usize)
+            .unwrap_or(defaults.max_total_tokens)
+            .clamp(500, 32000);
+
+        let mut max_rag = max_rag_tokens
+            .map(|v| v as usize)
+            .unwrap_or(defaults.max_rag_tokens)
+            .clamp(100, max_total);
+
+        let max_rag_append = max_rag_append_tokens
+            .map(|v| v as usize)
+            .unwrap_or(defaults.max_rag_append_tokens)
+            .clamp(100, max_total);
+
+        let mut max_user = max_user_tokens
+            .map(|v| v as usize)
+            .unwrap_or(defaults.max_user_tokens)
+            .clamp(50, max_total);
+
+        if max_rag > max_total {
+            max_rag = max_total;
+        }
+        if max_user > max_total {
+            max_user = max_total;
+        }
+        Self {
+            max_total_tokens: max_total,
+            max_rag_tokens: max_rag,
+            max_rag_append_tokens: max_rag_append,
+            max_user_tokens: max_user,
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -103,7 +167,11 @@ impl MemoryHandler {
         }
     }
 
-    pub async fn update_parsed_content(&self, log_id: i64, parsed_content: String) -> Result<(), String> {
+    pub async fn update_parsed_content(
+        &self,
+        log_id: i64,
+        parsed_content: String,
+    ) -> Result<(), String> {
         let db_lock = self.db.lock().await;
         db_lock.update_parsed_content(log_id, parsed_content)
     }
@@ -124,8 +192,9 @@ impl MemoryHandler {
         main_api: (&str, &str, &str),
         shadow_api: (&str, &str, &str),
         embed_api: (&str, &str, &str),
+        token_limits: TokenLimits,
     ) -> Result<MainAiResponseWithId, String> {
-        if count_tokens(&user_input) > MAX_USER_TOKENS {
+        if count_tokens(&user_input) > token_limits.max_user_tokens {
             return Err("User input exceeds token limit.".to_string());
         }
 
@@ -147,7 +216,8 @@ impl MemoryHandler {
         let query_emb =
             call_embedding_api(embed_api.0, embed_api.1, embed_api.2, user_input.clone()).await?;
 
-        let rag_text = Self::retrieve_rag_relevant(query_emb, all_chunks)?;
+        let rag_text =
+            Self::retrieve_rag_relevant(query_emb, all_chunks, token_limits.max_rag_tokens)?;
 
         let (summary, history) = Self::parse_context(&context_mem);
 
@@ -168,7 +238,7 @@ impl MemoryHandler {
             total_tokens += count_tokens(content) + 5;
         }
 
-        if total_tokens <= MAX_TOTAL_TOKENS {
+        if total_tokens <= token_limits.max_total_tokens {
             let ai_content = chat_completion(
                 main_api.0,
                 main_api.1,
@@ -183,7 +253,7 @@ impl MemoryHandler {
             .await?;
 
             let ai_res = Self::parse_main_response(ai_content)?;
-            let mut ai_log_id = 0;  // 0 means no reply
+            let mut ai_log_id = 0; // 0 means no reply
             {
                 let db_lock = self.db.lock().await;
 
@@ -242,7 +312,12 @@ impl MemoryHandler {
         }
 
         let compress_future = compress_context(to_compress_ctx, shadow_api);
-        let rag_future = self.generate_new_rag(context_mem.clone(), shadow_api, embed_api);
+        let rag_future = self.generate_new_rag(
+            context_mem.clone(),
+            shadow_api,
+            embed_api,
+            token_limits.max_rag_append_tokens,
+        );
 
         let (comp_res, new_rag_data) = tokio::join!(compress_future, rag_future);
 
@@ -323,6 +398,7 @@ impl MemoryHandler {
     fn retrieve_rag_relevant(
         query_emb: Vec<f32>,
         all_chunks: Vec<(String, Vec<f32>, String)>,
+        max_rag_tokens: usize,
     ) -> Result<String, String> {
         if all_chunks.is_empty() {
             return Ok(String::new());
@@ -337,7 +413,7 @@ impl MemoryHandler {
         let mut tokens_used = 0;
         for (score, text) in scored {
             let t = count_tokens(&text);
-            if (tokens_used + t > MAX_RAG_TOKENS) || score <= 0.2 {
+            if (tokens_used + t > max_rag_tokens) || score <= 0.2 {
                 break;
             }
             dbg!(&score, &text);
@@ -353,17 +429,18 @@ impl MemoryHandler {
         context: String,
         api: (&str, &str, &str),
         embed_api: (&str, &str, &str),
+        max_rag_append_tokens: usize,
     ) -> Result<Vec<(String, Vec<f32>, String)>, String> {
         let all_chunks = {
             let db_lock = self.db.lock().await;
             db_lock.get_all_rag_chunks()?
         };
-        let mut new_chunks = Vec::new();
+        
         let mut last_chunks_text = Vec::new();
         let mut tokens_used = 0;
         for (text, _, _) in all_chunks.iter().rev() {
             let t = count_tokens(text);
-            if tokens_used + t > MAX_RAG_APPEND_TOKENS {
+            if tokens_used + t > max_rag_append_tokens {
                 break;
             }
             last_chunks_text.push(text.clone());
@@ -372,7 +449,7 @@ impl MemoryHandler {
         last_chunks_text.reverse();
 
         let existing_rag_prompt = if last_chunks_text.is_empty() {
-            String::from("No existing RAG chunks.")
+            String::from("No existing memory.")
         } else {
             last_chunks_text.join("\n---\n")
         };
@@ -380,36 +457,50 @@ impl MemoryHandler {
         let current_time = Local::now().format("%Y-%m-%d").to_string();
 
         let prompt = format!(
-    "Extract NEW facts/preferences from the new conversation missing in the existing memory.\n\
-     Current date: [{}]\n\n\
-     Existing memory:\n{}\n\n\
-     New conversation:\n{}\n\n\
-     Rules:\n\
-     1. Group related details into a single paragraph. NEVER split related context into multiple chunks.\n\
-     2. Every chunk must start with `[{}]`.\n\
-     3. Separate chunks with double newlines.\n\
-     Output 'NONE' if nothing new.",
-    current_time, existing_rag_prompt, context, current_time
+            r#"Extract NEW facts/preferences from the new conversation missing in the existing memory.
+Current date: [{}]
+
+Existing memory:
+{}
+
+New conversation:
+{}
+
+Rules:
+1. Group related details into a single paragraph. NEVER split related context.
+2. Every chunk MUST start with `[{}]`.
+3. Output a JSON object with a single key "facts" containing an array of strings. Example: {{"facts": ["[{}] Fact 1", "[{}] Fact 2"]}}
+4. If nothing new, output exactly: {{"facts": []}}"#,
+            current_time, existing_rag_prompt, context, current_time, current_time, current_time
         );
 
-        let res = call_shadow_ai(api.0, api.1, api.2, prompt).await?;
+        let res = call_shadow_ai(api.0, api.1, api.2, prompt, true).await?;
 
-        if res.trim().eq_ignore_ascii_case("NONE") || res.trim().is_empty() {
-            return Ok(new_chunks);
+        #[derive(serde::Deserialize)]
+        struct RagFacts {
+            facts: Vec<String>,
         }
 
-        let new_texts: Vec<String> = res
-            .split("\n\n")
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
+        let parsed_facts: RagFacts = serde_json::from_str(&res)
+            .map_err(|e| format!("RAG JSON Parse Error: {}. Raw: {}", e, res))?;
 
-        for text in new_texts {
+        if parsed_facts.facts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut new_chunks = Vec::new();
+
+        for text in parsed_facts.facts {
+            let clean_text = text.trim().to_string();
+            if clean_text.is_empty() {
+                continue;
+            }
+
             if let Ok(emb) =
-                call_embedding_api(embed_api.0, embed_api.1, embed_api.2, text.clone()).await
+                call_embedding_api(embed_api.0, embed_api.1, embed_api.2, clean_text.clone()).await
             {
                 let ts = Local::now().to_rfc3339();
-                new_chunks.push((text, emb, ts));
+                new_chunks.push((clean_text, emb, ts));
             }
         }
 

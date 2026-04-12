@@ -37,7 +37,7 @@ rodio = "0.19"
 rusqlite = { version = "0.31", features = ["bundled"] }
 rand = "0.8"
 chrono = "0.4.44"
-# openssl-sys = { version = "0.9", features = ["vendored"] }
+openssl-sys = { version = "0.9", features = ["vendored"] }
 async-trait = "0.1.89"
 scraper = "0.26.0"
 rsmorphy = "0.4.0"
@@ -51,3 +51,4 @@ anyhow = "1.0"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+similar = "2.6"

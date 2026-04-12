@@ -113,13 +113,21 @@ pub async fn call_shadow_ai(
     api_url: &str,
     model_name: &str,
     prompt: String,
+    json_formatted: bool,
 ) -> Result<String, String> {
-    let body = json!({
+    let mut body = json!({
         "model": model_name,
         "messages": [{ "role": "user", "content": prompt }],
         "stream": false,
         "temperature": 0.3
     });
+
+    if json_formatted {
+        body["response_format"] = json!({
+            "type": "json_object"
+        });
+    }
+
     let client = Client::new();
     let resp = client
         .post(api_url)
@@ -157,7 +165,7 @@ pub async fn compress_context(
         \"temporary\": \"[Summarized recent flow to become new CONTEXT SUMMARY]\"}}.\n\nContext:\n{}",
         context
     );
-    let res = call_shadow_ai(api.0, api.1, api.2, prompt).await?;
+    let res = call_shadow_ai(api.0, api.1, api.2, prompt, true).await?;
     serde_json::from_str(&res).map_err(|e| format!("Parse compression JSON failed: {}", e))
 }
 
@@ -170,7 +178,7 @@ pub async fn merge_global_memory(
         "Merge new permanent info into existing global memory. Remove duplicates, resolve conflicts (favor new). \
         Output a single dense paragraph.\n\n[NEW]\n{}\n\n[EXISTING]\n{}", new_perm, old_global
     );
-    call_shadow_ai(api.0, api.1, api.2, prompt).await
+    call_shadow_ai(api.0, api.1, api.2, prompt, false).await
 }
 
 pub async fn call_embedding_api(

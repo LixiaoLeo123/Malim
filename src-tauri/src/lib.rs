@@ -23,7 +23,8 @@ mod memory;
 use crate::memory::init_db;
 use memory::{
     get_alpha, get_daily_reading, get_reading_by_date, get_vocabulary_expectation,
-    get_words_in_p_range, record_word_click, record_unparsed_text_words, run_global_calibration, update_daily_reading,
+    get_words_in_p_range, record_unparsed_text_words, record_word_click, run_global_calibration,
+    update_daily_reading,
 };
 use rusqlite::Connection;
 
@@ -51,16 +52,19 @@ mod brain;
 mod resolver;
 use brain::get_brain_words;
 
-
-
-pub fn build_prompt(lang: &str, sentence: &str, stress_mark: bool, show_grammar_notes: bool) -> String {
+pub fn build_prompt(
+    lang: &str,
+    sentence: &str,
+    stress_mark: bool,
+    show_grammar_notes: bool,
+) -> String {
     let mut prompt = String::with_capacity(1024);
 
     prompt.push_str("STRICT RULES:\n");
-    prompt.push_str("1. Output MUST be a single, valid JSON object.\n");
-    prompt.push_str("2. Do NOT use Markdown code blocks (```json ... ```) in output.\n");
-    prompt.push_str("3. Use ONLY standard ASCII punctuation.\n");
-    prompt.push_str("4. Do NOT include any text outside the JSON object.\n\n");
+    prompt.push_str("1. Output must be a single, valid JSON object.\n");
+    // prompt.push_str("2. Do NOT use Markdown code blocks (```json ... ```) in output.\n");
+    // prompt.push_str("3. Use ONLY standard ASCII punctuation.\n");
+    // prompt.push_str("4. Do NOT include any text outside the JSON object.\n\n");
 
     match lang {
         "KR" => {
@@ -70,19 +74,35 @@ pub fn build_prompt(lang: &str, sentence: &str, stress_mark: bool, show_grammar_
             prompt.push_str("- Output punctuation as separate blocks with pos 'punctuation'.\n");
             prompt.push_str("POS: noun, pronoun, verb, adjective, adverb, particle, ending, punctuation, unknown.\n");
             prompt.push_str("FIELDS: text, pos, definition, chinese_root (MANDATORY for Sino-Korean, else null)");
-            
+
             if show_grammar_notes {
                 prompt.push_str(", grammar_note");
             }
             prompt.push_str(".\n\n");
 
-            let note_noun = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
-            let note_particle = if show_grammar_notes { r#", "grammar_note": "Location marker"# } else { "" };
-            let note_verb = if show_grammar_notes { r#", "grammar_note": "Formal, present tense"# } else { "" };
-            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+            let note_noun = if show_grammar_notes {
+                r#", "grammar_note": null"#
+            } else {
+                ""
+            };
+            let note_particle = if show_grammar_notes {
+                r#", "grammar_note": "Location marker"#
+            } else {
+                ""
+            };
+            let note_verb = if show_grammar_notes {
+                r#", "grammar_note": "Formal, present tense"#
+            } else {
+                ""
+            };
+            let note_punct = if show_grammar_notes {
+                r#", "grammar_note": null"#
+            } else {
+                ""
+            };
 
             let example = format!(
-r#"Example Output:
+                r#"Example Output:
 {{
   "translation": "I go to school.",
   "blocks": [
@@ -120,7 +140,6 @@ r#"Example Output:
             }
             prompt.push_str("\n");
 
-
             let he = "Он";
             let (read, read_lemma, book, book_lemma, table, table_lemma) = if stress_mark {
                 ("прочита́л", "прочита́ть", "кни́гу", "кни́га", "столе́", "сто́л")
@@ -128,16 +147,39 @@ r#"Example Output:
                 ("прочитал", "прочитать", "книгу", "книга", "столе", "стол")
             };
 
-
-            let note_pron = if show_grammar_notes { r#", "grammar_note": "Subject, nominative case."# } else { "" };
-            let note_verb = if show_grammar_notes { r#", "grammar_note": "Past tense, perfective aspect."# } else { "" };
-            let note_noun1 = if show_grammar_notes { r#", "grammar_note": "Direct object, accusative case."# } else { "" };
-            let note_prep = if show_grammar_notes { r#", "grammar_note": "Governs Prepositional case for location."# } else { "" };
-            let note_noun2 = if show_grammar_notes { r#", "grammar_note": "Prepositional case governed by 'на'."# } else { "" };
-            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+            let note_pron = if show_grammar_notes {
+                r#", "grammar_note": "Subject, nominative case."#
+            } else {
+                ""
+            };
+            let note_verb = if show_grammar_notes {
+                r#", "grammar_note": "Past tense, perfective aspect."#
+            } else {
+                ""
+            };
+            let note_noun1 = if show_grammar_notes {
+                r#", "grammar_note": "Direct object, accusative case."#
+            } else {
+                ""
+            };
+            let note_prep = if show_grammar_notes {
+                r#", "grammar_note": "Governs Prepositional case for location."#
+            } else {
+                ""
+            };
+            let note_noun2 = if show_grammar_notes {
+                r#", "grammar_note": "Prepositional case governed by 'на'."#
+            } else {
+                ""
+            };
+            let note_punct = if show_grammar_notes {
+                r#", "grammar_note": null"#
+            } else {
+                ""
+            };
 
             let example = format!(
-r#"Example Output:
+                r#"Example Output:
 {{
   "translation": "He read the book on the table.",
   "blocks": [
@@ -150,22 +192,31 @@ r#"Example Output:
   ]
 }}
 "#,
-                he=he, note_pron=note_pron,
-                read=read, read_lemma=read_lemma, note_verb=note_verb,
-                book=book, book_lemma=book_lemma, note_noun1=note_noun1,
-                note_prep=note_prep,
-                table=table, table_lemma=table_lemma, note_noun2=note_noun2,
-                note_punct=note_punct
+                he = he,
+                note_pron = note_pron,
+                read = read,
+                read_lemma = read_lemma,
+                note_verb = note_verb,
+                book = book,
+                book_lemma = book_lemma,
+                note_noun1 = note_noun1,
+                note_prep = note_prep,
+                table = table,
+                table_lemma = table_lemma,
+                note_noun2 = note_noun2,
+                note_punct = note_punct
             );
             prompt.push_str(&example);
         }
         _ => {
-            prompt.push_str("Task: Sentence analysis (translation, tokenization, POS, definitions).\n");
+            prompt.push_str(
+                "Task: Sentence analysis (translation, tokenization, POS, definitions).\n",
+            );
         }
     }
 
     let _ = write!(prompt, "\nSentence to analyze: {}\n", sentence);
-    
+
     prompt
 }
 
@@ -317,6 +368,12 @@ async fn fetch_accented_text(text: &str, server_url: &str) -> Result<String, Str
         dbg!(&err_msg);
         Err(err_msg)
     }
+}
+
+#[tauri::command]
+async fn accentize_text(text: String, ruaccent_url: String) -> Result<String, String> {
+    let clean_text = text.replace('\u{0301}', "");
+    fetch_accented_text(&clean_text, &ruaccent_url).await
 }
 
 async fn generate_tts_audio(
@@ -798,7 +855,10 @@ async fn call_ai_api(
         "temperature": 0,
         "stream": false,
         "max_tokens": 8196,
-        "enable_thinking": false
+        "enable_thinking": false,
+        "response_format": {
+            "type": "json_object"
+        }
     });
 
     let res = client
@@ -1454,7 +1514,9 @@ pub fn run() {
             app.manage(AppState {
                 http_client: reqwest::Client::builder()
                     .user_agent("LangLearnBot/1.0")
-                    .dns_resolver(std::sync::Arc::new(resolver::CustomHickoryResolver::default()))
+                    .dns_resolver(std::sync::Arc::new(
+                        resolver::CustomHickoryResolver::default(),
+                    ))
                     .build()
                     .unwrap(),
                 scrapers_by_lang: scrapers::registry::get_scrapers_by_language(),
@@ -1498,6 +1560,7 @@ pub fn run() {
             send_message,
             trigger_proactive,
             translate,
+            accentize_text,
             check_grammar,
             get_chat_logs,
             save_grammar_corrections,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from "svelte";
+	import { onDestroy, onMount, tick } from "svelte";
 	import { fly, fade } from "svelte/transition";
 	import { invoke } from "@tauri-apps/api/core";
 	import { currentView, settings } from "../lib/stores";
@@ -70,8 +70,11 @@
 	let chatContainer: HTMLElement;
 	let isLoadingHistory = false;
 	let hasMoreHistory = true;
+	let historyLoadedOnce = false;
 	let firstLoad = true;
 	let containerEl: HTMLElement | null = null;
+	let proactiveTimer: number | null = null;
+	let scheduledProactiveKey: string | null = null;
 
 	let activeParsedBlock: Block | null = null;
 	let activeParsedBlockEl: HTMLElement | null = null;
@@ -336,6 +339,7 @@
 	}
 
 	function formatTime(ts: number): string {
+		if (!Number.isFinite(ts)) return "--:--";
 		const date = new Date(ts);
 		const now = new Date();
 		const isToday = date.toDateString() === now.toDateString();
@@ -365,9 +369,41 @@
 		return await invoke("translate", { text });
 	}
 
+	async function maybeAccentizeRuText(text: string): Promise<string> {
+		if (!$settings.ruaccentEnabled) return text;
+		const ruaccentUrl = $settings.ruaccentUrl?.trim();
+		if (!ruaccentUrl) return text;
+		if (!/[\u0400-\u04FFЁё]/.test(text)) return text;
+
+		try {
+			return await invoke("accentize_text", {
+				text,
+				ruaccentUrl,
+			});
+		} catch (e) {
+			console.warn("Accentize translation failed:", e);
+			return text;
+		}
+	}
+
 	function getConfigById(id: string | undefined) {
 		if (!id) return undefined;
 		return $settings.aiConfigList.find((c) => c.id === id);
+	}
+
+	function safeJsonParse<T>(raw: string | null | undefined): T | null {
+		if (!raw) return null;
+		try {
+			return JSON.parse(raw) as T;
+		} catch (e) {
+			console.warn("Invalid JSON in chat history field:", e);
+			return null;
+		}
+	}
+
+	function safeTimestampToMillis(raw: string): number {
+		const parsed = Date.parse(raw);
+		return Number.isFinite(parsed) ? parsed : Date.now();
 	}
 
 	async function apiCheckGrammar(text: string): Promise<GrammarCorrection[]> {
@@ -413,6 +449,13 @@
 			embedApiKey: embedConfig?.apiKey ?? "",
 			embedApiUrl: embedConfig?.apiUrl ?? "",
 			embedModelName: embedConfig?.modelName ?? "",
+			maxTotalTokens: Math.max(500, Number($settings.maxTotalTokens || 4000)),
+			maxRagTokens: Math.max(100, Number($settings.maxRagTokens || 1000)),
+			maxRagAppendTokens: Math.max(
+				100,
+				Number($settings.maxRagAppendTokens || 1000),
+			),
+			maxUserTokens: Math.max(50, Number($settings.maxUserTokens || 500)),
 		});
 	}
 
@@ -424,6 +467,8 @@
 				? (messages[0].dbLogId ?? messages[0].id)
 				: null;
 		try {
+			const args =
+				beforeId === null ? { limit: 20 } : { beforeId, limit: 20 };
 			const res = await invoke<{
 				messages: Array<{
 					id: number;
@@ -434,34 +479,39 @@
 					parsed_content: string | null;
 				}>;
 				has_more: boolean;
-			}>("get_chat_logs", { beforeId, limit: 20 });
+			}>("get_chat_logs", args);
+			historyLoadedOnce = true;
 			hasMoreHistory = res.has_more;
 			if (res.messages && res.messages.length > 0) {
 				const oldScrollHeight = chatContainer
 					? chatContainer.scrollHeight
 					: 0;
-				const formattedLogs = res.messages.map((msg) => ({
-					id: msg.id,
-					dbLogId: msg.id,
-					text: parseQuote(msg.content).text,
-					isMine: msg.role === "user",
-					timestamp: new Date(msg.timestamp).getTime(),
-					status: "success" as const,
-					grammarCorrections: msg.grammar_corrections
-						? JSON.parse(msg.grammar_corrections)
-						: undefined,
-					grammarStatus: msg.grammar_corrections
-						? ("success" as const)
-						: undefined,
-					parsedSentences: msg.parsed_content
-						? JSON.parse(msg.parsed_content)
-						: null,
-					parseStatus: msg.parsed_content ? ("done" as const) : null,
-					detectedLang: msg.parsed_content
-						? detectLanguage(msg.content)
-						: undefined,
-					quoteText: parseQuote(msg.content).quote,
-				}));
+				const formattedLogs = res.messages.map((msg) => {
+					const parsedQuote = parseQuote(msg.content);
+					const grammarCorrections =
+						safeJsonParse<GrammarCorrection[]>(msg.grammar_corrections);
+					const parsedSentences =
+						safeJsonParse<Sentence[]>(msg.parsed_content);
+
+					return {
+						id: msg.id,
+						dbLogId: msg.id,
+						text: parsedQuote.text,
+						isMine: msg.role === "user",
+						timestamp: safeTimestampToMillis(msg.timestamp),
+						status: "success" as const,
+						grammarCorrections: grammarCorrections ?? undefined,
+						grammarStatus: grammarCorrections
+							? ("success" as const)
+							: undefined,
+						parsedSentences,
+						parseStatus: parsedSentences ? ("done" as const) : null,
+						detectedLang: parsedSentences
+							? detectLanguage(msg.content)
+							: undefined,
+						quoteText: parsedQuote.quote,
+					};
+				});
 				messages = [...formattedLogs, ...messages];
 				await tick();
 				if (chatContainer) {
@@ -500,7 +550,8 @@
 		if (match) {
 			isTranslating = true;
 			try {
-				translationResult = await apiTranslate(match[1].trim());
+				const translated = await apiTranslate(match[1].trim());
+				translationResult = await maybeAccentizeRuText(translated);
 			} catch (e) {
 				translationResult = "Translation Error";
 			} finally {
@@ -678,39 +729,80 @@
 		messages = [...messages];
 	}
 
-	onMount(async () => {
-		if ($settings.proactiveEvent) {
-			const { time, message } = $settings.proactiveEvent;
-			const delay = new Date(time).getTime() - Date.now();
-			const fireProactive = async () => {
-				messages = [
-					...messages,
-					{
-						id: Date.now(),
-						text: message,
-						isMine: false,
-						timestamp: new Date(time).getTime(),
-						status: "success",
-					},
-				];
-				scrollToBottom();
-				try {
-					await invoke("trigger_proactive", {
-						message: message,
-						scheduledTime: time,
-					});
-				} catch (e) {
-					console.error("Failed to sync proactive msg:", e);
-				}
-				settings.update((s) => {
-					s.proactiveEvent = null;
-					return s;
-				});
-			};
-			if (delay <= 0) fireProactive();
-			else setTimeout(fireProactive, delay);
+	function clearProactiveTimer() {
+		if (proactiveTimer) {
+			clearTimeout(proactiveTimer);
+			proactiveTimer = null;
 		}
+	}
+
+	async function fireProactiveEvent(time: string, message: string) {
+		messages = [
+			...messages,
+			{
+				id: Date.now(),
+				text: message,
+				isMine: false,
+				timestamp: new Date(time).getTime(),
+				status: "success",
+			},
+		];
+		scrollToBottom();
+
+		try {
+			await invoke("trigger_proactive", {
+				message,
+				scheduledTime: time,
+			});
+		} catch (e) {
+			console.error("Failed to sync proactive msg:", e);
+		}
+
+		settings.update((s) => {
+			s.proactiveEvent = null;
+			return s;
+		});
+	}
+
+	function syncProactiveSchedule() {
+		const event = $settings.proactiveEvent;
+		if (!event) {
+			scheduledProactiveKey = null;
+			clearProactiveTimer();
+			return;
+		}
+
+		const key = `${event.time}__${event.message}`;
+		if (scheduledProactiveKey === key) return;
+
+		scheduledProactiveKey = key;
+		clearProactiveTimer();
+
+		const delay = new Date(event.time).getTime() - Date.now();
+		if (delay <= 0) {
+			void fireProactiveEvent(event.time, event.message);
+			return;
+		}
+
+		proactiveTimer = window.setTimeout(() => {
+			proactiveTimer = null;
+			void fireProactiveEvent(event.time, event.message);
+		}, delay);
+	}
+
+	onMount(async () => {
 		await loadHistory();
+		if (!historyLoadedOnce) {
+			setTimeout(() => {
+				if (!historyLoadedOnce && messages.length === 0) {
+					loadHistory();
+				}
+			}, 1200);
+		}
+	});
+
+	onDestroy(() => {
+		clearProactiveTimer();
 	});
 
 	function onPointerDown(e: PointerEvent | TouchEvent, msgId: number) {
@@ -746,6 +838,19 @@
 				}
 			});
 		});
+	}
+
+	$: if (
+		$currentView === "chat" &&
+		messages.length === 0 &&
+		!isLoadingHistory &&
+		hasMoreHistory
+	) {
+		loadHistory();
+	}
+
+	$: if ($currentView === "chat") {
+		syncProactiveSchedule();
 	}
 </script>
 
@@ -1248,6 +1353,60 @@
 						})}
 				/>
 			</div>
+			<div class="setting-item token-setting">
+				<label>Chat Token Limits</label>
+				<div class="setting-tip">Recommended: 4000 / 1000 / 1000 / 500</div>
+				<div class="token-grid">
+					<div class="token-row">
+						<div class="token-row-head">Max Total Tokens</div>
+						<div class="token-row-desc">Total token budget for one chat turn context.</div>
+						<input
+							type="number"
+							class="token-input"
+							min="500"
+							step="100"
+							bind:value={$settings.maxTotalTokens}
+							placeholder="4000"
+						/>
+					</div>
+					<div class="token-row">
+						<div class="token-row-head">Max RAG Tokens</div>
+						<div class="token-row-desc">Max tokens injected from retrieved RAG memory.</div>
+						<input
+							type="number"
+							class="token-input"
+							min="100"
+							step="50"
+							bind:value={$settings.maxRagTokens}
+							placeholder="1000"
+						/>
+					</div>
+					<div class="token-row">
+						<div class="token-row-head">Max RAG Append Tokens</div>
+						<div class="token-row-desc">Max historical RAG tokens used when appending new memory.</div>
+						<input
+							type="number"
+							class="token-input"
+							min="100"
+							step="50"
+							bind:value={$settings.maxRagAppendTokens}
+							placeholder="1000"
+						/>
+					</div>
+					<div class="token-row">
+						<div class="token-row-head">Max User Tokens</div>
+						<div class="token-row-desc">Max tokens allowed for a single user message.</div>
+						<input
+							type="number"
+							class="token-input"
+							min="50"
+							step="25"
+							bind:value={$settings.maxUserTokens}
+							placeholder="500"
+						/>
+					</div>
+				</div>
+			</div>
 		</div>
 	{/if}
 </div>
@@ -1383,7 +1542,7 @@
 		align-items: flex-start;
 		gap: 12px;
 		min-width: 0;
-		overflow: hidden;
+		overflow: visible;
 	}
 
 	.mine .msg-content {
@@ -1409,7 +1568,7 @@
 		max-width: 75%;
 		gap: 4px;
 		min-width: 0;
-		overflow: hidden;
+		overflow: visible;
 	}
 	.mine .bubble-group {
 		align-items: flex-end;
@@ -1472,7 +1631,8 @@
 	.bubble::before {
 		content: "";
 		position: absolute;
-		top: 14px;
+		top: 50%;
+		transform: translateY(-50%);
 		border-style: solid;
 	}
 
@@ -2033,6 +2193,10 @@
 		background-color: var(--drawer-bg);
 		z-index: 30;
 		padding: 20px;
+		padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+		overflow-y: auto;
+		-webkit-overflow-scrolling: touch;
+		overscroll-behavior: contain;
 		box-shadow: -4px 0 15px rgba(0, 0, 0, 0.1);
 	}
 
@@ -2076,9 +2240,69 @@
 		border-radius: 6px;
 		outline: none;
 	}
+
+	.token-setting {
+		padding: 10px;
+		border: 1px solid var(--border-color);
+		border-radius: 10px;
+		background: color-mix(in srgb, var(--input-bg) 86%, transparent);
+	}
+
+	.setting-tip {
+		font-size: 12px;
+		color: var(--text-secondary);
+		margin-top: -2px;
+	}
+
+	.token-grid {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.token-row {
+		border: 1px solid var(--border-color);
+		border-radius: 8px;
+		padding: 8px;
+		background-color: color-mix(in srgb, var(--input-bg) 92%, transparent);
+	}
+
+	.token-row-head {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--text-primary);
+	}
+
+	.token-row-desc {
+		font-size: 11px;
+		color: var(--text-secondary);
+		margin-top: 2px;
+		margin-bottom: 6px;
+		line-height: 1.35;
+	}
+
+	.token-row input {
+		padding: 10px 10px;
+		font-size: 13px;
+	}
+
+	.token-input {
+		appearance: textfield;
+		-moz-appearance: textfield;
+	}
+
+	.token-input::-webkit-outer-spin-button,
+	.token-input::-webkit-inner-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
+	}
 	@media (prefers-color-scheme: dark) {
 		.quote-bubble {
 			background-color: rgba(255, 255, 255, 0.08);
+		}
+
+		.token-setting {
+			background: color-mix(in srgb, var(--input-bg) 82%, transparent);
 		}
 	}
 </style>

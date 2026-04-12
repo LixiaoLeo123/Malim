@@ -79,6 +79,10 @@ export interface Settings {
   syncServerUrl: string;
   userId: string; 
   memoryModelEnabled: boolean;
+  maxTotalTokens: number;
+  maxRagTokens: number;
+  maxRagAppendTokens: number;
+  maxUserTokens: number;
   userAvatarUrl: string;
   aiAvatarUrl: string;
   proactiveEvent: ProactiveEvent | null;

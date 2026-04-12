@@ -11,7 +11,7 @@
     import { slide } from "svelte/transition";
 
     import { open, save } from "@tauri-apps/plugin-dialog";
-    import { copyFile } from "@tauri-apps/plugin-fs";
+    import { readFile, writeFile } from "@tauri-apps/plugin-fs";
     import { invoke } from "@tauri-apps/api/core";
     import { notifications } from "$lib/notificationStore";
 
@@ -123,9 +123,9 @@
         }
 
         try {
-            const tempPath = (await invoke("create_export_temp_file", {
+            const zipBytes = (await invoke("create_export_temp_file", {
                 selectedNames: selected,
-            })) as string;
+            })) as number[];
 
             const destPath = await save({
                 filters: [{ name: "Backup", extensions: ["zip"] }],
@@ -133,7 +133,7 @@
             });
 
             if (destPath) {
-                await copyFile(tempPath, destPath);
+                await writeFile(destPath, new Uint8Array(zipBytes));
                 notifications.success("Export successful!");
             }
         } catch (e) {
@@ -154,8 +154,9 @@
             importSelections = {};
 
             try {
+                const archiveData = await readFile(importFilePath);
                 const files = await invoke("check_import_file", {
-                    filePath: importFilePath,
+                    archiveData: Array.from(archiveData),
                 });
                 foundImportFiles = files as string[];
                 if (foundImportFiles.length === 0) {
@@ -178,8 +179,9 @@
         if (selected.length === 0) return;
 
         try {
+            const archiveData = await readFile(importFilePath);
             const res = await invoke("execute_import", {
-                filePath: importFilePath,
+                archiveData: Array.from(archiveData),
                 selectedNames: selected,
             });
             notifications.success(res as string);

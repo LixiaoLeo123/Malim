@@ -1,6 +1,6 @@
 use tauri::Manager;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, copy};
+use std::io::{copy, Cursor};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 use zip::read::ZipArchive;
@@ -27,14 +27,10 @@ pub fn get_backup_definitions() -> Vec<BackupItem> {
 
 
 #[tauri::command]
-pub fn create_export_temp_file(app: tauri::AppHandle, selected_names: Vec<String>) -> Result<String, String> {
+pub fn create_export_temp_file(app: tauri::AppHandle, selected_names: Vec<String>) -> Result<Vec<u8>, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let temp_dir = app.path().temp_dir().map_err(|e| e.to_string())?;
-    
-    let temp_path = temp_dir.join("malim_export_temp.zip");
-    let file = File::create(&temp_path).map_err(|e| format!("Failed to create temp file: {}", e))?;
-    
-    let mut zip = ZipWriter::new(BufWriter::new(file));
+    let buffer = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(buffer);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     for name in selected_names {
@@ -46,15 +42,14 @@ pub fn create_export_temp_file(app: tauri::AppHandle, selected_names: Vec<String
         }
     }
 
-    zip.finish().map_err(|e| e.to_string())?;
-    
-    temp_path.to_str().ok_or("Failed to get temp path".to_string()).map(|s| s.to_string())
+    let buffer = zip.finish().map_err(|e| e.to_string())?;
+
+    Ok(buffer.into_inner())
 }
 
 #[tauri::command]
-pub fn check_import_file(file_path: String) -> Result<Vec<String>, String> {
-    let file = File::open(&file_path).map_err(|e| format!("Failed to open file: {}", e))?;
-    let reader = BufReader::new(file);
+pub fn check_import_file(archive_data: Vec<u8>) -> Result<Vec<String>, String> {
+    let reader = Cursor::new(archive_data);
     let mut archive = ZipArchive::new(reader).map_err(|e| format!("Invalid zip file: {}", e))?;
     
     let valid_names: Vec<String> = get_backup_items().iter().map(|i| i.name.clone()).collect();
@@ -72,10 +67,9 @@ pub fn check_import_file(file_path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub fn execute_import(app: tauri::AppHandle, file_path: String, selected_names: Vec<String>) -> Result<String, String> {
+pub fn execute_import(app: tauri::AppHandle, archive_data: Vec<u8>, selected_names: Vec<String>) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let file = File::open(&file_path).map_err(|e| format!("Failed to open file: {}", e))?;
-    let reader = BufReader::new(file);
+    let reader = Cursor::new(archive_data);
     let mut archive = ZipArchive::new(reader).map_err(|e| format!("Invalid zip file: {}", e))?;
 
     for name in selected_names {
