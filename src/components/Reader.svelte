@@ -15,6 +15,7 @@
     } from "lucide-svelte";
     import { fade, fly } from "svelte/transition";
     import Flag from "./Flag.svelte";
+    import WordPopover from "./WordPopover.svelte";
     import type { Sentence, Block, Article } from "../lib/types";
     import { onMount, onDestroy } from "svelte";
     import { playAudio, stopAudio } from "../lib/audio";
@@ -28,7 +29,7 @@
     let activeBlockEl: HTMLElement | null = null;
     let activeSentence: Sentence | null = null;
     let viewMode: "word" | "sentence" = "word";
-    let popoverPosition = { top: 0, left: 0, align: "bottom", arrowLeft: 0 };
+    let popoverPosition = { top: 0, left: 0, align: "bottom" as "top" | "bottom", arrowLeft: 0 };
     let isGrammarExpanded = false;
 
     let clickedLemmasBySection = new Map<number, Set<string>>();
@@ -313,7 +314,7 @@
         const viewportW = document.documentElement.clientWidth || window.innerWidth;
         const viewportH = document.documentElement.clientHeight || window.innerHeight;
         const containerRect = containerEl ? containerEl.getBoundingClientRect() : { left: 0, top: 0, right: viewportW };
-        const popoverWidth = 300;
+        const popoverWidth = 260;
         const arrowSize = 8;
 
         const blockCenter = rect.left + rect.width / 2;
@@ -502,79 +503,13 @@
         {/if}
     </div>
 
-    {#if activeBlock && viewMode === "word"}
-        <div
-            class="reader-popover fixed z-50 w-[300px] bg-zinc-900/95 backdrop-blur text-white rounded-xl shadow-2xl p-4"
-            style="left: {popoverPosition.left}px; top: {popoverPosition.top}px; transform: translateY({popoverPosition.align ===
-            'top'
-                ? '-100%'
-                : '0'});"
-            transition:fade={{ duration: 150 }}
-            on:click|stopPropagation
-        >
-            <div class="flex flex-col space-y-2">
-                {#if activeBlock.chinese_root}
-                    <div
-                        class="inline-block self-start bg-yellow-500/20 text-yellow-300 text-xs px-1.5 py-0.5 rounded border border-yellow-500/50 mb-1"
-                    >
-                        [{activeBlock.chinese_root}]
-                    </div>
-                {/if}
-                <div class="text-lg font-bold text-white">
-                    {activeBlock.definition}
-                </div>
-                {#if article?.language === "RU" && activeBlock.gram_number === "pl"}
-                    <div
-                        class="absolute top-2 right-2 w-5 h-5 rounded-full bg-purple-600 text-white text-[10px] flex items-center justify-center"
-                    >
-                        P
-                    </div>
-                {/if}
-                {#if article?.language === "RU" && activeBlock.pos === "verb"}
-                    <div class="flex gap-2 mt-2 text-xs">
-                        {#if activeBlock.tense}
-                            <div
-                                class="inline-block self-start bg-blue-500/15 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/40"
-                            >
-                                {activeBlock.tense}
-                            </div>
-                        {/if}
-                        {#if activeBlock.aspect}
-                            <div
-                                class={`inline-block self-start px-1.5 py-0.5 rounded border text-xs ${
-                                    activeBlock.aspect === "pf"
-                                        ? "bg-orange-500/15 text-orange-300 border-orange-500/40"
-                                        : "bg-cyan-500/15 text-cyan-300 border-cyan-500/40"
-                                }`}
-                            >
-                                {activeBlock.aspect === "pf" ? "PF" : "IPF"}
-                            </div>
-                        {/if}
-                    </div>
-                {/if}
-                {#if article?.language === "RU" && activeBlock.lemma}
-                    <div class="text-sm text-zinc-300 mt-1">
-                        Lemma:
-                        <span class="font-semibold">{activeBlock.lemma}</span>
-                    </div>
-                {/if}
-                {#if activeBlock.grammar_note}
-                    <div
-                        class="text-zinc-400 text-sm border-t border-zinc-700 pt-2 mt-1"
-                    >
-                        {activeBlock.grammar_note}
-                    </div>
-                {/if}
-            </div>
-            <div
-                class="absolute w-4 h-4 bg-zinc-900/95 rotate-45"
-                style="left: {popoverPosition.arrowLeft}px; {popoverPosition.align ===
-                'top'
-                    ? 'bottom: -6px;'
-                    : 'top: -6px;'}"
-            ></div>
-        </div>
-    {/if}
+{#if activeBlock && viewMode === "word"}
+		<WordPopover
+			block={activeBlock}
+			position={popoverPosition}
+			language={article?.language}
+		/>
+	{/if}
 
     {#if activeSentence && viewMode === "sentence"}
         <div

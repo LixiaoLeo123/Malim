@@ -5,6 +5,8 @@
 	import { currentView, settings } from "../lib/stores";
 	import { notifications } from "$lib/notificationStore";
 	import { playAudio, stopAudio } from "../lib/audio";
+	import type { Block, Sentence } from "../lib/types";
+	import WordPopover from "./WordPopover.svelte";
 
 	interface GrammarCorrection {
 		original: string | null;
@@ -18,29 +20,6 @@
 		proactive_message: string | null;
 		user_log_id: number;
 		ai_log_id: number;
-	}
-
-	interface Block {
-		text: string;
-		pos: string;
-		definition: string;
-		chinese_root?: string;
-		grammar_note?: string;
-		audio_path?: string | null;
-		lemma?: string | null;
-		gram_case?: number | null;
-		gram_gender?: "m" | "f" | "n" | null;
-		gram_number?: "sg" | "pl" | null;
-		tense?: string | null;
-		aspect?: "pf" | "impf" | null;
-	}
-
-	interface Sentence {
-		id: string;
-		original: string;
-		blocks: Block[];
-		translation: string;
-		audio_path?: string | null;
 	}
 
 	interface ChatMessage {
@@ -308,26 +287,40 @@
 	function calcPopoverPos() {
 		if (!activeParsedBlockEl) return;
 		const rect = activeParsedBlockEl.getBoundingClientRect();
-                const containerRect = containerEl ? containerEl.getBoundingClientRect() : { left: 0, top: 0 };
-		const pw = 264;
-		const sw = window.innerWidth;
-		const sh = window.innerHeight;
-		const as = 7;
-		
-		const bc = rect.left + rect.width / 2;
-		let pl = bc - pw / 2;
-		if (pl + pw > sw - 12) pl = sw - pw - 12;
-		if (pl < 8) pl = 8;
-		
-		let al = bc - pl - as;
-		al = Math.max(8, Math.min(pw - 20, al));
-		const below = sh - rect.bottom;
-		const top = below < 200;
+		const viewportW =
+			document.documentElement.clientWidth || window.innerWidth;
+		const viewportH =
+			document.documentElement.clientHeight || window.innerHeight;
+		const containerRect = containerEl
+			? containerEl.getBoundingClientRect()
+			: { left: 0, top: 0, right: viewportW };
+		const popoverWidth = 260;
+		const arrowSize = 8;
+
+		const blockCenter = rect.left + rect.width / 2;
+
+		let popoverLeft = blockCenter - popoverWidth / 2;
+		if (
+			popoverLeft + popoverWidth >
+			(containerRect.right || viewportW) - 20
+		)
+			popoverLeft =
+				(containerRect.right || viewportW) - popoverWidth - 20;
+
+		if (popoverLeft < containerRect.left + 10)
+			popoverLeft = containerRect.left + 10;
+
+		let arrowLeft = blockCenter - popoverLeft - arrowSize;
+		arrowLeft = Math.max(8, Math.min(popoverWidth - 24, arrowLeft));
+
+		const spaceBelow = viewportH - rect.bottom;
+		const top = spaceBelow < 250;
+
 		popoverPos = {
-			left: pl - containerRect.left,
+			left: popoverLeft - containerRect.left,
 			top: (top ? rect.top - 10 : rect.bottom + 10) - containerRect.top,
 			align: top ? "top" : "bottom",
-			arrowLeft: al,
+			arrowLeft: arrowLeft,
 		};
 	}
 
@@ -1248,70 +1241,17 @@
 		</div>
 	{/if}
 
-	{#if activeParsedBlock}
-		<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-		<div
-			class="parse-popover"
-			style="
-        left: {popoverPos.left}px;
-        top: {popoverPos.top}px;
-        transform: translateY({popoverPos.align === 'top' ? '-100%' : '0'});
-      "
-			transition:fade={{ duration: 130 }}
-			on:click|stopPropagation
-		>
-			<div class="popover-inner">
-				{#if activeParsedBlock.chinese_root}
-					<span class="popover-tag root-tag"
-						>[{activeParsedBlock.chinese_root}]</span
-					>
-				{/if}
-
-				<div class="popover-def">{activeParsedBlock.definition}</div>
-
-				{#if activeParsedBlock.lemma}
-					<div class="text-sm text-zinc-300 mt-1">
-						Lemma: <span class="font-semibold"
-							>{activeParsedBlock.lemma}</span
-						>
-					</div>
-				{/if}
-
-				{#if activeParsedBlock.grammar_note}
-					<div class="popover-note">
-						{activeParsedBlock.grammar_note}
-					</div>
-				{/if}
-
-				<div class="popover-tags">
-					{#if activeParsedBlock.tense}
-						<span class="popover-tag tense-tag"
-							>{activeParsedBlock.tense}</span
-						>
-					{/if}
-					{#if activeParsedBlock.aspect}
-						<span
-							class="popover-tag aspect-tag {activeParsedBlock.aspect ===
-							'pf'
-								? 'pf'
-								: 'impf'}"
-						>
-							{activeParsedBlock.aspect === "pf" ? "PF" : "IPF"}
-						</span>
-					{/if}
-					{#if activeParsedBlock.gram_number === "pl"}
-						<span class="popover-tag plural-tag">PL</span>
-					{/if}
-				</div>
-			</div>
-			<div
-				class="popover-arrow"
-				style="
-          left: {popoverPos.arrowLeft}px;
-          {popoverPos.align === 'top' ? 'bottom: -6px;' : 'top: -6px;'}
-        "
-			></div>
-		</div>
+{#if activeParsedBlock}
+		<WordPopover
+			block={activeParsedBlock}
+			position={{
+				left: popoverPos.left,
+				top: popoverPos.top,
+				align: popoverPos.align,
+				arrowLeft: popoverPos.arrowLeft,
+			}}
+			language={activeParsedBlockEl?.closest("[data-lang]")?.getAttribute("data-lang") || "RU"}
+		/>
 	{/if}
 
 	{#if isDrawerOpen}

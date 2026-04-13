@@ -1,6 +1,8 @@
 use tauri::Manager;
 use std::fs::File;
 use std::io::{copy, Cursor};
+use std::path::Path;
+use rusqlite::Connection;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 use zip::read::ZipArchive;
@@ -20,6 +22,37 @@ fn get_backup_items() -> Vec<BackupItem> {
     ]
 }
 
+fn checkpoint_sqlite_db(db_path: &Path) -> Result<(), String> {
+    if !db_path.exists() {
+        return Ok(());
+    }
+
+    let conn = Connection::open(db_path)
+        .map_err(|e| format!("Failed to open {}: {}", db_path.display(), e))?;
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .map_err(|e| format!("Failed to checkpoint {}: {}", db_path.display(), e))?;
+    Ok(())
+}
+
+fn copy_file_to_zip(
+    zip: &mut ZipWriter<Cursor<Vec<u8>>>,
+    data_dir: &Path,
+    name: &str,
+    options: SimpleFileOptions,
+) -> Result<(), String> {
+    let file_path = data_dir.join(name);
+    if !file_path.exists() {
+        return Ok(());
+    }
+
+    let mut file = File::open(&file_path)
+        .map_err(|e| format!("Failed to open {}: {}", name, e))?;
+    zip.start_file(name, options)
+        .map_err(|e| e.to_string())?;
+    copy(&mut file, zip).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_backup_definitions() -> Vec<BackupItem> {
     get_backup_items()
@@ -35,10 +68,18 @@ pub fn create_export_temp_file(app: tauri::AppHandle, selected_names: Vec<String
 
     for name in selected_names {
         let file_path = data_dir.join(&name);
-        if file_path.exists() {
-            let mut f = File::open(&file_path).map_err(|e| format!("Failed to open {}: {}", name, e))?;
-            zip.start_file(&name, options).map_err(|e| e.to_string())?;
-            copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
+
+        if name.ends_with(".db") {
+            checkpoint_sqlite_db(&file_path)?;
+        }
+
+        copy_file_to_zip(&mut zip, &data_dir, &name, options)?;
+
+        if name.ends_with(".db") {
+            let wal_name = format!("{}-wal", name);
+            let shm_name = format!("{}-shm", name);
+            copy_file_to_zip(&mut zip, &data_dir, &wal_name, options)?;
+            copy_file_to_zip(&mut zip, &data_dir, &shm_name, options)?;
         }
     }
 
@@ -73,11 +114,24 @@ pub fn execute_import(app: tauri::AppHandle, archive_data: Vec<u8>, selected_nam
     let mut archive = ZipArchive::new(reader).map_err(|e| format!("Invalid zip file: {}", e))?;
 
     for name in selected_names {
-        let mut file_in_zip = archive.by_name(&name).map_err(|e| format!("File {} not found: {}", name, e))?;
         let out_path = data_dir.join(&name);
-        
-        let mut outfile = File::create(&out_path).map_err(|e| format!("Failed to create {}: {}", name, e))?;
-        copy(&mut file_in_zip, &mut outfile).map_err(|e| e.to_string())?;
+
+        if let Ok(mut file_in_zip) = archive.by_name(&name) {
+            let mut outfile = File::create(&out_path).map_err(|e| format!("Failed to create {}: {}", name, e))?;
+            copy(&mut file_in_zip, &mut outfile).map_err(|e| e.to_string())?;
+        }
+
+        if name.ends_with(".db") {
+            for suffix in ["-wal", "-shm"] {
+                let sidecar_name = format!("{}{}", name, suffix);
+                if let Ok(mut sidecar) = archive.by_name(&sidecar_name) {
+                    let sidecar_path = data_dir.join(&sidecar_name);
+                    let mut outfile = File::create(&sidecar_path)
+                        .map_err(|e| format!("Failed to create {}: {}", sidecar_name, e))?;
+                    copy(&mut sidecar, &mut outfile).map_err(|e| e.to_string())?;
+                }
+            }
+        }
     }
 
     Ok("Import successful. Restart app to apply.".to_string())

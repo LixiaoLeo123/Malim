@@ -1090,23 +1090,40 @@ async fn parse_text(
                 }
             };
 
+            let lemma_needs_accent = |lemma: &str| {
+                let mut vowel_count = 0;
+
+                for ch in lemma.chars().filter(|c| *c != '\u{0301}') {
+                    match ch.to_lowercase().next().unwrap_or(ch) {
+                        'а' | 'е' | 'ё' | 'и' | 'о' | 'у' | 'ы' | 'э' | 'ю' | 'я' => {
+                            vowel_count += 1;
+                        }
+                        _ => {}
+                    }
+                }
+
+                vowel_count >= 2 && !lemma.contains('\u{0301}') && !lemma.contains('ё')
+            };
+
             let (mut blocks, translation) = if cached.as_ref().map_or(false, |b| {
                 b.blocks.last().map_or(false, |last| last.pos != "error")
             }) {
                 let mut b = cached.unwrap();
-                let has_accents = b.blocks.iter().any(|block| block.text.contains('\u{0301}'));
-                if is_ru && ruaccent_enabled && !has_accents {
-                    let clean_raw = raw.replace('\u{0301}', "");
-                    if let Ok(accented_sentence) =
-                        fetch_accented_text(&clean_raw, &ctx.ruaccent_url).await
-                    {
-                        align_accents(&mut b.blocks, accented_sentence);
+                let has_text_accents = b.blocks.iter().any(|block| block.text.contains('\u{0301}'));
+                if is_ru && ruaccent_enabled {
+                    if !has_text_accents {
+                        let clean_raw = raw.replace('\u{0301}', "");
+                        if let Ok(accented_sentence) =
+                            fetch_accented_text(&clean_raw, &ctx.ruaccent_url).await
+                        {
+                            align_accents(&mut b.blocks, accented_sentence);
+                        }
                     }
                     let lemmas_to_accentize: Vec<(usize, String)> = b
                         .blocks
                         .iter()
                         .enumerate()
-                        .filter_map(|(i, block)| block.lemma.clone().map(|l| (i, l)))
+                        .filter_map(|(i, block)| block.lemma.clone().filter(|l| lemma_needs_accent(l)).map(|l| (i, l)))
                         .collect();
 
                     let ruaccent_url_for_lemma = ctx.ruaccent_url.clone();
@@ -1179,7 +1196,7 @@ async fn parse_text(
                     let lemmas_to_accentize: Vec<(usize, String)> = new_blocks
                         .iter()
                         .enumerate()
-                        .filter_map(|(i, b)| b.lemma.clone().map(|l| (i, l)))
+                        .filter_map(|(i, b)| b.lemma.clone().filter(|l| lemma_needs_accent(l)).map(|l| (i, l)))
                         .collect();
 
                     let ruaccent_url_for_lemma = ctx.ruaccent_url.clone();

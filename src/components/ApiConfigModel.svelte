@@ -310,7 +310,7 @@
             <h2
                 class="pt-5 text-lg font-semibold text-zinc-800 dark:text-zinc-100"
             >
-                API Configuration
+                Settings
             </h2>
 
             <div class="space-y-2">
