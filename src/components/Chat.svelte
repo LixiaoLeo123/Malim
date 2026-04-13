@@ -537,7 +537,7 @@
 
 	async function handleInput(e: Event) {
 		const target = e.target as HTMLTextAreaElement;
-		target.style.height = "36px";
+		target.style.height = "40px";
 		target.style.height = Math.min(target.scrollHeight, 150) + "px";
 		const match = inputText.match(/([a-zA-Z\s,']+)\?$/);
 		if (match) {
@@ -1921,10 +1921,10 @@
 		font-size: 16px;
 		outline: none;
 		resize: none;
-		height: 36px;
-		min-height: 36px;
+		height: 40px;
+		min-height: 40px;
 		max-height: 150px;
-		line-height: 1.4;
+		line-height: 24px;
 		overflow-y: auto;
 		font-family: inherit;
 		white-space: pre-wrap;
