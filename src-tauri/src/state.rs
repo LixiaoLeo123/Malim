@@ -14,6 +14,8 @@ pub struct AppState {
     pub memory_handler: MemoryHandler,
 
     pub translator: Option<Mutex<Translator>>,
+
+    pub chat_lock: tokio::sync::Mutex<()>,
 }
 
 impl AppState {

@@ -275,21 +275,21 @@
             transition:slide={{axis: 'y'}}
         >
             {#if showMultiDeleteConfirm}
-                <span class="text-[13px] font-bold text-red-500 tracking-wide uppercase">
+                <span class="text-xs font-bold text-red-500 tracking-wide uppercase shrink-0">
                     Delete {selectedArticleIds.size}?
                 </span>
                 <div class="flex items-center gap-1.5" in:fade={{ duration: 150 }}>
                     <button
                         on:click={() => showMultiDeleteConfirm = false}
-                        class="flex items-center gap-1 px-3 py-1.5 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors"
+                        class="flex items-center justify-center w-8 h-8 md:w-auto md:px-2.5 md:py-1.5 md:gap-1 bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors"
                     >
-                        <X size={14} strokeWidth={2.5} /> Cancel
+                        <X size={15} strokeWidth={2.5} /> <span class="hidden md:inline">Cancel</span>
                     </button>
                     <button
                         on:click={() => { showMultiDeleteConfirm = false; deleteSelected(); }}
-                        class="flex items-center gap-1 px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-bold uppercase tracking-wider transition-colors shadow-sm"
+                        class="flex items-center justify-center w-8 h-8 md:w-auto md:px-2.5 md:py-1.5 md:gap-1 bg-red-500 hover:bg-red-600 text-white rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors shadow-sm"
                     >
-                        <CheckCircle2 size={14} strokeWidth={2.5} /> Confirm
+                        <CheckCircle2 size={15} strokeWidth={2.5} /> <span class="hidden md:inline">Confirm</span>
                     </button>
                 </div>
             {:else}

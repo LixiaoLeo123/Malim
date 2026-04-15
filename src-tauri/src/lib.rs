@@ -1539,6 +1539,7 @@ pub fn run() {
                 scrapers_by_lang: scrapers::registry::get_scrapers_by_language(),
                 emitted_urls: std::sync::Mutex::new(std::collections::HashSet::new()),
                 memory_handler: handler,
+                chat_lock: tokio::sync::Mutex::new(()),
                 translator: {
                     match translation::Translator::new() {
                         Ok(t) => Some(std::sync::Mutex::new(t)),

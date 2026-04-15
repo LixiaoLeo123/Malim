@@ -43,6 +43,7 @@ pub async fn send_message(
     max_rag_append_tokens: Option<u32>,
     max_user_tokens: Option<u32>,
 ) -> Result<MainAiResponseWithId, String> {
+    let _lock = state.chat_lock.lock().await;
     let handler = &state.memory_handler;
     let main_api = (
         main_api_key.as_str(),

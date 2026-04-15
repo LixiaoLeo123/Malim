@@ -62,29 +62,33 @@ def process_cyrillic_with_fallback(text: str) -> str:
         return text
     
     try:
-        return accentizer.process_all(text)
-    except Exception:
-        pass
-
-    parts = PUNCTUATION_SPLIT_RE.split(text)
-    res_parts = []
-    
-    for part in parts:
-        if not part:
-            continue
         try:
-            res_parts.append(accentizer.process_all(part))
+            return str(accentizer.process_all(text))
         except Exception:
-            words = part.split(' ')
-            safe_words = []
-            for word in words:
-                try:
-                    safe_words.append(accentizer.process_all(word))
-                except Exception:
-                    safe_words.append(word)
-            res_parts.append(' '.join(safe_words))
+            pass
 
-    return ''.join(res_parts)
+        parts = PUNCTUATION_SPLIT_RE.split(text)
+        res_parts = []
+        
+        for part in parts:
+            if not part:
+                continue
+            try:
+                res_parts.append(str(accentizer.process_all(part)))
+            except Exception:
+                words = part.split(' ')
+                safe_words = []
+                for word in words:
+                    try:
+                        res = accentizer.process_all(word)
+                        safe_words.append(str(res) if res is not None else word)
+                    except Exception:
+                        safe_words.append(str(word))
+                res_parts.append(' '.join(safe_words))
+
+        return ''.join(res_parts)
+    except Exception:
+        return text
 
 
 def accentize_text_safe(text: str, accentizer) -> str:

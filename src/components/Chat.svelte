@@ -52,6 +52,7 @@
 	let historyLoadedOnce = false;
 	let firstLoad = true;
 	let containerEl: HTMLElement | null = null;
+	let textareaEl: HTMLTextAreaElement | null = null;
 	let proactiveTimer: number | null = null;
 	let scheduledProactiveKey: string | null = null;
 
@@ -249,7 +250,7 @@
 		msgId: number,
 	) {
 		event.stopPropagation();
-		if (block.pos === "unknown" || block.pos === "punctuation") return;
+		if (block.pos === "unknown" || block.pos === "punctuation" || block.pos === "error") return;
 
 		// Record the click to backend, like Reader
 		if (block.lemma) {
@@ -268,7 +269,7 @@
 		}
 
 		if (activeParsedBlock === block) {
-			closeParsePopover();
+			closeParsePopover(true);
 			return;
 		}
 		activeParsedBlock = block;
@@ -324,11 +325,11 @@
 		};
 	}
 
-	function closeParsePopover() {
+	function closeParsePopover(stop: boolean = true) {
 		activeParsedBlock = null;
 		activeParsedBlockEl = null;
 		activeParsedSentence = null;
-		stopAudio();
+		if (stop) stopAudio();
 	}
 
 	function formatTime(ts: number): string {
@@ -571,7 +572,7 @@
 				
 				pMsg.parsedSentences.forEach((s) => {
 					s.blocks.forEach((b) => {
-						if (b.pos !== "unknown" && b.pos !== "punctuation" && b.lemma) {
+						if (b.pos !== "unknown" && b.pos !== "punctuation" && b.pos !== "error" && b.lemma) {
 							if (!msgLemmas.has(b.lemma) && $settings.memoryModelEnabled) {
 								msgLemmas.add(b.lemma);
 								invoke("record_word_click", {
@@ -593,6 +594,31 @@
 			}
 		});
 		unconsumedParsedMessages.clear();
+
+		let sectionWordCount = 0;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const m = messages[i];
+			if (m.isMine) break;
+
+			if (m.parsedSentences) {
+				m.parsedSentences.forEach((s: any) => {
+					if (s.original) {
+						const trimmed = s.original.trim();
+						if (trimmed.length > 0) {
+							sectionWordCount += trimmed.split(/\s+/).length;
+						}
+					}
+				});
+			} else if (m.text) {
+				const trimmed = m.text.trim();
+				if (trimmed.length > 0) {
+					sectionWordCount += trimmed.split(/\s+/).length;
+				}
+			}
+		}
+		if (sectionWordCount > 0) {
+			invoke("update_daily_reading", { count: sectionWordCount }).catch(console.error);
+		}
 
 		let payload: string;
 		if (resendId) {
@@ -623,6 +649,7 @@
 				},
 			];
 			inputText = "";
+			if (textareaEl) textareaEl.style.height = "40px";
 			translationResult = "";
 			quotingMsg = null;
 			scrollToBottom();
@@ -854,12 +881,16 @@
 			!(e.target as Element).closest(".context-menu")
 		)
 			closeContextMenu();
+	}}
+	on:click={(e) => {
 		if (
 			activeParsedBlock &&
 			!(e.target as Element).closest(".parse-popover") &&
 			!(e.target as Element).closest(".word-block")
-		)
-			closeParsePopover();
+		) {
+			const isSentence = !!(e.target as Element).closest(".parsed-sentence");
+			closeParsePopover(!isSentence);
+		}
 	}}
 />
 
@@ -1126,6 +1157,7 @@
 		{/if}
 		<div class="input-wrapper">
 			<textarea
+				bind:this={textareaEl}
 				bind:value={inputText}
 				on:input={handleInput}
 				on:keydown={(e) => {

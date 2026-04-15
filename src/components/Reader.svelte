@@ -131,6 +131,7 @@
             viewMode === "word" &&
             block.pos !== "unknown" &&
             block.pos !== "punctuation" &&
+            block.pos !== "error" &&
             block.lemma
         ) {
             if (!clickedLemmasBySection.has(sectionIdx)) {
@@ -344,7 +345,10 @@
         activeBlockEl = null;
     }
 
+    import { currentView } from "$lib/stores";
+
     function handleGlobalClick(e: MouseEvent) {
+        if ($currentView !== "reader") return;
         const target = e.target as HTMLElement;
         if (
             !target.closest(".interactive-block") &&
