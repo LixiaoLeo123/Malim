@@ -265,6 +265,7 @@
             showGrammarNotes: tempGrammarNotesEnabled,
         }));
         opened = false;
+        notifications.success("Settings saved!");
     }
 
     const roles: { key: AiRole; label: string; description: string }[] = [

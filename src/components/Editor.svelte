@@ -37,7 +37,7 @@
         if (!contentSnapshot.trim()) return;
 
         if (!$settings.defaultAiConfigId) {
-            notifications.warning("Please configure your API first.");
+            notifications.warning("Default AI configuration not found.");
             return;
         }
 
@@ -83,6 +83,8 @@
         currentView.set("home");
         parsingQueue.update((q) => [...q, id]);
         processQueue();
+        notifications.success(isEditMode ? "Article updated!" : 
+            "Article created!");
     }
 </script>
 

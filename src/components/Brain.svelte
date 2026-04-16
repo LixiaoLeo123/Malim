@@ -68,9 +68,9 @@
         words.sort((a, b) => b.s - a.s);
 
         const maxTextNodes = 150;
-        const sortedByP = [...words].sort((a, b) => b.p - a.p);
+        const shuffledWords = [...words].sort(() => 0.5 - Math.random());
         const topWordsSet = new Set(
-            sortedByP.slice(0, maxTextNodes).map((w) => w.lemma),
+            shuffledWords.slice(0, maxTextNodes).map((w) => w.lemma),
         );
 
         const geometry = new THREE.BufferGeometry();
@@ -121,7 +121,7 @@
         geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
         geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
         const material = new THREE.PointsMaterial({
-            size: 0.12,
+            size: 0.3,
             vertexColors: true,
             transparent: true,
             opacity: 0.8,
@@ -259,7 +259,7 @@
         canvas.width = 256;
         canvas.height = 128;
 
-        const baseSize = 24;
+        const baseSize = 14;
         const fontSize = Math.floor(baseSize + p * baseSize);
 
         ctx.font = `bold ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
@@ -281,7 +281,7 @@
         if (p > 0.8) {
             ctx.fillStyle = `#${theme.highlightColor.getHexString()}`;
         } else {
-            ctx.fillStyle = isDarkMode ? theme.textColor : "#111827"; // 强制深色
+            ctx.fillStyle = isDarkMode ? theme.textColor : "#111827";
         }
         ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 
@@ -294,7 +294,7 @@
         });
         const sprite = new THREE.Sprite(material);
 
-        const scale = 0.03 * fontSize;
+        const scale = 0.02 * fontSize;
         sprite.scale.set(scale * 2, scale, 1);
         return sprite;
     }
