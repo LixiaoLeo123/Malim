@@ -295,7 +295,7 @@
         editorDraft.set({
             title: selectedArticle.title,
             content: selectedArticle.title + ".\n" + selectedArticle.content,
-            language: selectedArticle.language,
+            language: selectedArticle.language.toUpperCase(),
         });
         // console.log("Added to draft:", selectedArticle?.title);
         notifications.success("Article added to draft!");
@@ -314,7 +314,7 @@
             parsingProgress: 0,
             sentences: [],
             draftContent: selectedArticle?.title + ".\n" + selectedArticle?.content || "",
-            language: selectedArticle?.language || "RU",
+            language: selectedArticle?.language.toUpperCase() || "RU",
             readProgress: 0,
             completedCheckpointsList: [],
             stared: false,

@@ -951,6 +951,7 @@ async fn parse_text(
     if api_key.is_empty() {
         return Err("API Key is missing".to_string());
     }
+    let language = language.trim().to_uppercase();
 
     let mut old_map = HashMap::new();
     if let Some(old) = old_sentences {

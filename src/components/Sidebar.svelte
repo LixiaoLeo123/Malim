@@ -400,12 +400,16 @@
                             </div>
                         {/if}
 
+                        <div class="absolute -left-10 -bottom-10 opacity-[0.08] dark:opacity-[0.12] pointer-events-none transition-all duration-300 group-hover:scale-110 group-hover:rotate-6 group-hover:opacity-[0.15] dark:group-hover:opacity-[0.2]">
+                            <Flag code={article.language} size={96} />
+                        </div>
+
                         {#if article.stared}
-                            <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-orange-400 rounded-l-xl"></div>
+                            <div class="absolute left-0 top-0 bottom-0 w-[3px] bg-orange-400 rounded-l-xl z-10"></div>
                         {/if}
                         
                         {#if article.status !== "parsing" && article.status !== "error" && article.readProgress > 0}
-                            <div class="absolute top-0 left-0 right-0 h-0.5 bg-zinc-100 dark:bg-zinc-800/80 overflow-hidden opacity-80 group-hover:opacity-100 transition-opacity">
+                            <div class="absolute top-0 left-0 right-0 h-0.5 bg-zinc-100 dark:bg-zinc-800/80 overflow-hidden opacity-80 group-hover:opacity-100 transition-opacity z-10">
                                 <div 
                                     class="h-full bg-emerald-500 rounded-r-full transition-all duration-500" 
                                     style="width: {article.readProgress}%"
@@ -413,7 +417,7 @@
                             </div>
                         {/if}
 
-                        <div class="px-3 py-2.5 flex flex-col gap-1.5 {article.stared ? 'pl-4' : ''}">
+                        <div class="px-3 py-2.5 flex flex-col gap-1.5 z-10 relative {article.stared ? 'pl-4' : ''}">
                             <div class="flex items-start justify-between gap-3">
                                 <h3
                                     class="font-semibold text-zinc-800 text-[13.5px] leading-snug dark:text-zinc-200 line-clamp-2 pr-1"
@@ -437,9 +441,6 @@
                                             <Star size={13} />
                                         </button>
                                     {/if}
-                                    <div class="opacity-80 group-hover:opacity-100 transition-opacity hidden sm:block">
-                                        <Flag code={article.language} size={13} />
-                                    </div>
                                 </div>
                             </div>
 

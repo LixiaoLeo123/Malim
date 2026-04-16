@@ -194,7 +194,7 @@ impl KbsScraper {
 #[async_trait]
 impl NewsScraper for KbsScraper {
     fn language(&self) -> &str {
-        "ko"
+        "kr"
     }
 
     fn id(&self) -> &str {

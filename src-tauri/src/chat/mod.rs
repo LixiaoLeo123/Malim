@@ -313,6 +313,7 @@ impl MemoryHandler {
 
         let compress_future = compress_context(to_compress_ctx, shadow_api);
         let rag_future = self.generate_new_rag(
+            global_mem.clone(),
             context_mem.clone(),
             shadow_api,
             embed_api,
@@ -335,6 +336,8 @@ impl MemoryHandler {
             }
         }
 
+        let (final_summary, final_history) = Self::parse_context(&final_context);
+
         let main_ai_future = chat_completion(
             main_api.0,
             main_api.1,
@@ -342,8 +345,8 @@ impl MemoryHandler {
             &system_prompt_with_time,
             &global_mem,
             &rag_text,
-            &final_context,
-            vec![],
+            &final_summary,
+            final_history,
             &user_input,
         );
 
@@ -357,10 +360,8 @@ impl MemoryHandler {
             let db_lock = self.db.lock().await;
             ai_log_id = db_lock.append_log_return_id("assistant", &ai_res.reply)?;
 
-            let new_ctx = format!(
-                "[Summary]\n{}\n[History]\nUser: {}\nAssistant: {}",
-                final_context, user_input, ai_res.reply
-            );
+            let new_ctx = Self::append_to_context(&final_context, &user_input, &ai_res.reply);
+
             db_lock.set_context(&new_ctx)?;
 
             db_lock.set_global_memory(&new_global_mem?)?;
@@ -426,6 +427,7 @@ impl MemoryHandler {
     /// expect (text, embeddings, timestamp)
     async fn generate_new_rag(
         &self,
+        global: String,
         context: String,
         api: (&str, &str, &str),
         embed_api: (&str, &str, &str),
@@ -462,6 +464,7 @@ Current date: [{}]
 
 Existing memory:
 {}
+{}
 
 New conversation:
 {}
@@ -471,7 +474,7 @@ Rules:
 2. Every chunk MUST start with `[{}]`.
 3. Output a JSON object with a single key "facts" containing an array of strings. Example: {{"facts": ["[{}] Fact 1", "[{}] Fact 2"]}}
 4. If nothing new, output exactly: {{"facts": []}}"#,
-            current_time, existing_rag_prompt, context, current_time, current_time, current_time
+            current_time, global, existing_rag_prompt, context, current_time, current_time, current_time
         );
 
         let res = call_shadow_ai(api.0, api.1, api.2, prompt, true).await?;

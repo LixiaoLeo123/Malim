@@ -170,7 +170,7 @@ impl YnaScraper {
 #[async_trait]
 impl NewsScraper for YnaScraper {
     fn language(&self) -> &str {
-        "ko"
+        "kr"
     }
 
     fn id(&self) -> &str {

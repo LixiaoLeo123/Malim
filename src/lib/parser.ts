@@ -83,6 +83,7 @@ export async function processQueue() {
                 return i;
             })
         );
+        notifications.success("Parsing completed!");
     } catch (e) {
         console.error("Analysis Failed:", e);
         articles.update((items) =>
@@ -92,6 +93,7 @@ export async function processQueue() {
                     : i
             )
         );
+        notifications.error("Parsing failed.");
     } finally {
         unlisten();
         parsingQueue.update((q) => q.slice(1));
