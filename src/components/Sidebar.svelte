@@ -425,23 +425,25 @@
                                     {article.title || "Untitled"}
                                 </h3>
                                 
-                                <div class="flex items-center gap-1.5 shrink-0 pt-0.5">
-                                    {#if article.stared}
-                                        <button 
-                                            class="p-1 rounded-md bg-orange-50/50 dark:bg-orange-500/10 hover:bg-orange-100 dark:hover:bg-orange-500/20 transition-colors"
-                                            on:click|stopPropagation={() => toggleStar(article.id)}
-                                        >
-                                            <Star size={13} class="fill-orange-400 text-orange-400" />
-                                        </button>
-                                    {:else}
-                                        <button 
-                                            class="p-1 rounded-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all text-zinc-300 hover:text-zinc-500 dark:text-zinc-500 dark:hover:text-zinc-400"
-                                            on:click|stopPropagation={() => toggleStar(article.id)}
-                                        >
-                                            <Star size={13} />
-                                        </button>
-                                    {/if}
-                                </div>
+                                {#if !isSelectMode}
+                                    <div class="flex items-center gap-1.5 shrink-0 pt-0.5">
+                                        {#if article.stared}
+                                            <button 
+                                                class="p-1 rounded-md bg-orange-50/50 dark:bg-orange-500/10 hover:bg-orange-100 dark:hover:bg-orange-500/20 transition-colors"
+                                                on:click|stopPropagation={() => toggleStar(article.id)}
+                                            >
+                                                <Star size={13} class="fill-orange-400 text-orange-400" />
+                                            </button>
+                                        {:else}
+                                            <button 
+                                                class="p-1 rounded-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all text-zinc-300 hover:text-zinc-500 dark:text-zinc-500 dark:hover:text-zinc-400"
+                                                on:click|stopPropagation={() => toggleStar(article.id)}
+                                            >
+                                                <Star size={13} />
+                                            </button>
+                                        {/if}
+                                    </div>
+                                {/if}
                             </div>
 
                             {#if article.status === "parsing"}

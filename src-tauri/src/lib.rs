@@ -1015,7 +1015,9 @@ async fn parse_text(
     let tasks = raw_sentences.into_iter().enumerate().map(|(i, raw)| {
         let ctx = ctx.clone();
         async move {
-            let sentence_handle = if pre_cache_audio {
+            let has_text_content = raw.chars().any(|c| c.is_alphanumeric());
+
+            let sentence_handle = if pre_cache_audio && has_text_content {
                 let ctx = ctx.clone();
                 let raw = raw.clone();
                 Some(tokio::spawn(async move {
@@ -1106,7 +1108,25 @@ async fn parse_text(
                 vowel_count >= 2 && !lemma.contains('\u{0301}') && !lemma.contains('ё')
             };
 
-            let (mut blocks, translation) = if cached.as_ref().map_or(false, |b| {
+            let (mut blocks, translation) = if !has_text_content {
+                (
+                    vec![WordBlock {
+                        text: raw.clone(),
+                        pos: "punctuation".to_string(),
+                        definition: "".to_string(),
+                        chinese_root: None,
+                        grammar_note: None,
+                        audio_path: None,
+                        lemma: None,
+                        gram_case: None,
+                        gram_gender: None,
+                        gram_number: None,
+                        tense: None,
+                        aspect: None,
+                    }],
+                    raw.clone(),
+                )
+            } else if cached.as_ref().map_or(false, |b| {
                 b.blocks.last().map_or(false, |last| last.pos != "error")
             }) {
                 let mut b = cached.unwrap();

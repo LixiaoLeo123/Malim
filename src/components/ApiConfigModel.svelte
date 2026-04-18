@@ -18,7 +18,7 @@
     const roles: { key: AiRole; label: string; description: string }[] = [
         {
             key: "default",
-            label: "Default (Article Parsing)",
+            label: "Default",
             description: "Used for parsing articles",
         },
         {
