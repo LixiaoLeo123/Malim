@@ -14,7 +14,7 @@
     import { invoke } from "@tauri-apps/api/core";
     import { onMount } from "svelte";
     import { editorDraft } from "../lib/stores";
-    import { notifications } from "$lib/notificationStore";
+	import { notifications } from "$lib/notificationStore";
     import { v4 as uuidv4 } from "uuid";
     import type { Article as ArticleType } from "../lib/types";
     import { articles as libraryArticles, parsingQueue } from "../lib/stores";
@@ -160,6 +160,9 @@
             }
         } catch (error) {
             console.error("Failed to load sources:", error);
+            notifications.error(
+                `Failed to load sources: ${error instanceof Error ? error.message : String(error)}`,
+            );
         } finally {
             isLoadingSources = false;
         }
@@ -175,6 +178,9 @@
             // fetchFeed(false);
         } catch (error) {
             console.error("Failed to reset feed:", error);
+            notifications.error(
+                `Failed to reset feed: ${error instanceof Error ? error.message : String(error)}`,
+            );
         } finally {
             setTimeout(() => {
                 isResetting = false;
@@ -205,7 +211,9 @@
             }
         } catch (error) {
             console.error("Failed to fetch feed:", error);
-            notifications.error(error instanceof Error ? error.message : "Failed to fetch feed");
+            notifications.error(
+                `Failed to fetch feed: ${error instanceof Error ? error.message : String(error)}`,
+            );
             fetchTriggered = false;
         } finally {
             isLoading = false;
@@ -327,10 +335,6 @@
         notifications.success("Article added to library!");
         closeArticle();
     }
-
-    onMount(() => {
-        loadSources();
-    });
 
     $: if ($currentView === "discover" && sources.length === 0 && !isLoadingSources) {
         loadSources();

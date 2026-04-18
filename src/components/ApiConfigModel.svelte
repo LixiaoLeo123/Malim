@@ -15,6 +15,30 @@
     import { invoke } from "@tauri-apps/api/core";
     import { notifications } from "$lib/notificationStore";
 
+    const roles: { key: AiRole; label: string; description: string }[] = [
+        {
+            key: "default",
+            label: "Default (Article Parsing)",
+            description: "Used for parsing articles",
+        },
+        {
+            key: "main",
+            label: "Main Chat AI",
+            description: "Core conversation logic",
+        },
+        { key: "shadow", label: "Shadow AI", description: "Memory processing" },
+        {
+            key: "embed",
+            label: "Embedding Model",
+            description: "RAG and semantic search",
+        },
+        {
+            key: "grammar",
+            label: "Grammar Correction",
+            description: "Language correction tasks",
+        },
+    ];
+
     let showDataManagement = false;
     let backupItems: Array<{
         name: string;
@@ -138,7 +162,9 @@
             }
         } catch (e) {
             console.error(e);
-            notifications.error(`Export failed: ${e}`);
+            notifications.error(
+                `Export failed: ${e instanceof Error ? e.message : String(e)}`,
+            );
         }
     }
 
@@ -167,7 +193,9 @@
                     );
                 }
             } catch (e) {
-                notifications.error(`Failed to read backup: ${e}`);
+                notifications.error(
+                    `Failed to read backup: ${e instanceof Error ? e.message : String(e)}`,
+                );
             }
         }
     }
@@ -188,7 +216,9 @@
             importFilePath = "";
             foundImportFiles = [];
         } catch (e) {
-            notifications.error(`Import failed: ${e}`);
+            notifications.error(
+                `Import failed: ${e instanceof Error ? e.message : String(e)}`,
+            );
         }
     }
 
@@ -267,30 +297,6 @@
         opened = false;
         notifications.success("Settings saved!");
     }
-
-    const roles: { key: AiRole; label: string; description: string }[] = [
-        {
-            key: "default",
-            label: "Default (Article Parsing)",
-            description: "Used for parsing articles",
-        },
-        {
-            key: "main",
-            label: "Main Chat AI",
-            description: "Core conversation logic",
-        },
-        { key: "shadow", label: "Shadow AI", description: "Memory processing" },
-        {
-            key: "embed",
-            label: "Embedding Model",
-            description: "RAG and semantic search",
-        },
-        {
-            key: "grammar",
-            label: "Grammar Correction",
-            description: "Language correction tasks",
-        },
-    ];
 </script>
 
 {#if opened}

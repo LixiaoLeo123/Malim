@@ -5,29 +5,42 @@ import {
   stop as pluginStop,
 } from "tauri-plugin-media-toolkit-api";
 
-const osType = type();
+let osType: string | null = null;
+
+function getOsType() {
+  if (osType === null) {
+    try {
+      osType = type();
+    } catch {
+      osType = "unknown";
+    }
+  }
+
+  return osType;
+}
 
 let currentPlayerId: string | null = null;
 let audioPlayer: HTMLAudioElement | null = null;
 
 export function stopAudio() {
-  if (osType === "linux") {
-    if (currentPlayerId) {
-      pluginStop().catch(() => {});
-      currentPlayerId = null;
-    }
-  } else {
-    if (audioPlayer) {
-      audioPlayer.pause();
-      audioPlayer.currentTime = 0;
-      audioPlayer = null;
-    }
+  if (currentPlayerId) {
+    pluginStop().catch(() => {});
+    currentPlayerId = null;
+    return;
+  }
+
+  if (audioPlayer) {
+    audioPlayer.pause();
+    audioPlayer.currentTime = 0;
+    audioPlayer = null;
   }
 }
 
 export async function playAudio(localPath?: string | null) {
   stopAudio();
   if (!localPath) return;
+
+  const osType = getOsType();
 
   if (osType === "linux") {
     await pluginPlay({

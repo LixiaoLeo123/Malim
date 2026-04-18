@@ -122,11 +122,11 @@ pub fn build_prompt(
         }
         "RU" => {
             prompt.push_str("Task: Russian linguistic analysis.\n");
-            prompt.push_str("CORE: Context determines grammar. Analyze SYNTAX (verb government, prepositions) to determine Case.\n");
+            prompt.push_str("CORE: Context determines grammar. Analyze SYNTAX (verb government, prepositionse, etc).\n");
             prompt.push_str("POS: noun, verb, adjective, adverb, pronoun, preposition, conjunction, particle, punctuation, unknown.\n");
             prompt.push_str("FIELDS (if meaningful): text, pos, definition, lemma, gram_case (1-7), gram_gender (m/f/n), gram_number (sg/pl), tense (pres/past/fut/imp/inf/gerund), aspect (pf/impf).\n");
             prompt.push_str("RULES:\n");
-            prompt.push_str("- Nouns: Case depends on context (e.g., в/на+loc=Case 6, в/на+motion=Case 4, transitive verb=Case 4, quantifiers/negation=Case 2).\n");
+            prompt.push_str("- Nouns: Case depends on context and word form.\n");
             prompt.push_str("- Adjectives: Omit case/gender/number. Participles=adjective.\n");
             prompt.push_str("- Verbs: Lemma MUST be Infinitive (preserve aspect). Gerunds=verb(tense:gerund).\n");
             prompt.push_str("- Pronouns: 1st/2nd person defaults to 'm'.\n");

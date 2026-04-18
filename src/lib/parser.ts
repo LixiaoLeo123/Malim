@@ -8,7 +8,7 @@ import {
     isProcessingQueue,
     settings,
 } from "./stores";
-import { notifications } from '../lib/notificationStore';
+import { notifications } from './notificationStore';
 
 export async function processQueue() {
     const isProcessing = get(isProcessingQueue);
@@ -93,7 +93,7 @@ export async function processQueue() {
                     : i
             )
         );
-        notifications.error("Parsing failed.");
+        notifications.error(`Parsing failed: ${e instanceof Error ? e.message : e}`);
     } finally {
         unlisten();
         parsingQueue.update((q) => q.slice(1));

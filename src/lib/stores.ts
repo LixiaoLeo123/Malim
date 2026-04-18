@@ -124,7 +124,7 @@ async function loadWithIpcRetry() {
     console.error('Failed to load app state after IPC retries:', lastError);
 }
 
-let saveTimeout: ReturnType<typeof setTimeout>;
+let saveTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
 async function save() {
     clearTimeout(saveTimeout);
 

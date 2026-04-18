@@ -37,7 +37,6 @@
 		quoteText?: string | null;
 	}
 
-	let aiNickname = $settings.aiNickname || "malim";
 	let messages: ChatMessage[] = [];
 	let inputText = "";
 	let isTyping = false;
@@ -233,13 +232,17 @@
 				invoke("update_chat_parsed", {
 					logId: msg.dbLogId,
 					parsedContent: JSON.stringify(result),
-				}).catch((e) => console.error("Failed to save parsed:", e));
+				}).catch((e) => {
+					console.error("Failed to save parsed:", e);
+					notifications.error("Failed to save parsed content:" + (e instanceof Error ? e.message : String(e)));
+				});
 			}
 			messages = [...messages];
 		} catch (e) {
 			console.error("Parse failed:", e);
 			msg.parseStatus = "error";
 			messages = [...messages];
+			notifications.error("Failed to parse message:" + (e instanceof Error ? e.message : String(e)));
 		}
 	}
 
@@ -521,6 +524,7 @@
 			}
 		} catch (e) {
 			console.error("Failed to load history:", e);
+			notifications.error("Failed to load chat history:" + (e instanceof Error ? e.message : String(e)));
 		} finally {
 			isLoadingHistory = false;
 		}
@@ -578,7 +582,11 @@
 								invoke("record_word_click", {
 									lemma: b.lemma,
 									clicked: false,
-								}).catch(console.error);
+								}).catch((e) =>
+									notifications.error(
+										`Failed to save vocabulary progress: ${e instanceof Error ? e.message : String(e)}`,
+									),
+								);
 							}
 						}
 					});
@@ -589,7 +597,11 @@
 				// Record unparsed Russian messages directly
 				invoke("record_unparsed_text_words", {
 					text: pMsg.text
-				}).catch(console.error);
+				}).catch((e) =>
+					notifications.error(
+						`Failed to save vocabulary progress: ${e instanceof Error ? e.message : String(e)}`,
+					),
+				);
                 fullyConsumedMessageIds.add(pMsgId);
 			}
 		});
@@ -617,7 +629,11 @@
 			}
 		}
 		if (sectionWordCount > 0) {
-			invoke("update_daily_reading", { count: sectionWordCount }).catch(console.error);
+			invoke("update_daily_reading", { count: sectionWordCount }).catch((e) =>
+				notifications.error(
+					`Failed to update reading progress: ${e instanceof Error ? e.message : String(e)}`,
+				),
+			);
 		}
 
 		let payload: string;
@@ -709,6 +725,7 @@
 				let mIdx = messages.findIndex((m) => m.id === msgId);
 				if (mIdx !== -1) messages[mIdx].status = "error";
 				messages = [...messages];
+				notifications.error("Failed to send message:" + (err instanceof Error ? err.message : String(err)));
 			});
 
 		apiCheckGrammar(text)
@@ -719,7 +736,10 @@
 				messages[mIdx].grammarStatus = "success";
 				if (messages[mIdx].dbLogId) {
 					apiSaveGrammar(messages[mIdx].dbLogId!, grammarRes).catch(
-						(e) => console.error(e),
+						(e) =>
+							notifications.error(
+								`Failed to save grammar corrections: ${e instanceof Error ? e.message : String(e)}`,
+							),
 					);
 				}
 				messages = [...messages];
@@ -728,6 +748,9 @@
 				let mIdx = messages.findIndex((m) => m.id === msgId);
 				if (mIdx !== -1) messages[mIdx].grammarStatus = "error";
 				messages = [...messages];
+				notifications.error(
+					`Failed to check grammar: ${err instanceof Error ? err.message : String(err)}`,
+				);
 			});
 	}
 
@@ -745,6 +768,9 @@
 				await apiSaveGrammar(messages[mIdx].dbLogId!, result);
 		} catch (e) {
 			messages[mIdx].grammarStatus = "error";
+			notifications.error(
+				`Failed to check grammar: ${e instanceof Error ? e.message : String(e)}`,
+			);
 		}
 		messages = [...messages];
 	}
@@ -912,7 +938,7 @@
 				<path d="M15 19l-7-7 7-7" />
 			</svg>
 		</button>
-		<div class="title">{isTyping ? "Typing..." : aiNickname}</div>
+		<div class="title">{isTyping ? "Typing..." : $settings.aiNickname}</div>
 		<button class="icon-btn" on:click={() => (isDrawerOpen = true)}>
 			<svg viewBox="0 0 24 24" fill="currentColor">
 				<circle cx="5" cy="12" r="2.5" />
@@ -1317,12 +1343,7 @@
 				<label>AI Nickname</label>
 				<input
 					type="text"
-					bind:value={aiNickname}
-					on:change={() =>
-						settings.update((s) => {
-							s.aiNickname = aiNickname;
-							return s;
-						})}
+					bind:value={$settings.aiNickname}
 				/>
 			</div>
 			<div class="setting-item token-setting">
@@ -1603,7 +1624,7 @@
 	.bubble::before {
 		content: "";
 		position: absolute;
-		top: 50%;
+		top: 20px;
 		transform: translateY(-50%);
 		border-style: solid;
 	}

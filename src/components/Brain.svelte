@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onDestroy } from "svelte";
+    import { notifications } from "$lib/notificationStore";
     import { invoke } from "@tauri-apps/api/core";
     import { fade, fly } from "svelte/transition";
     import * as THREE from "three";
@@ -39,8 +40,18 @@
         sceneReady = true;
         
         console.log("Fetching brain data and initializing 3D scene...");
-        let words: Array<{ lemma: string; s: number; p: number }> =
-            await invoke("get_brain_words");
+        let words: Array<{ lemma: string; s: number; p: number }>;
+        try {
+            words = await invoke("get_brain_words");
+        } catch (e) {
+            console.error("Failed to load brain data:", e);
+            notifications.error(
+                `Failed to load brain data: ${e instanceof Error ? e.message : String(e)}`,
+            );
+            loading = false;
+            sceneReady = false;
+            return;
+        }
         loading = false;
 
         scene = new THREE.Scene();

@@ -3,6 +3,7 @@
     import { invoke } from "@tauri-apps/api/core";
     import { X, Copy, Check } from "lucide-svelte";
     import { slide } from "svelte/transition";
+    import { notifications } from "$lib/notificationStore";
 
     export let open = false;
 
@@ -108,7 +109,9 @@ Requirements:
 4. You may introduce other vocabulary words as needed to make the article natural and coherent.`;
         } catch (e) {
             console.error("Failed to generate prompt:", e);
-            alert("Failed to generate prompt: " + e);
+            notifications.error(
+                `Failed to generate prompt: ${e instanceof Error ? e.message : String(e)}`,
+            );
         } finally {
             isGenerating = false;
         }
@@ -123,7 +126,9 @@ Requirements:
             }, 2000);
         } catch (e) {
             console.error("Failed to copy:", e);
-            alert("Failed to copy to clipboard");
+            notifications.error(
+                `Failed to copy to clipboard: ${e instanceof Error ? e.message : String(e)}`,
+            );
         }
     }
 </script>
