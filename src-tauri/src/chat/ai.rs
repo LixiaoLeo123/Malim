@@ -175,8 +175,13 @@ pub async fn merge_global_memory(
     api: (&str, &str, &str),
 ) -> Result<String, String> {
     let prompt = format!(
-        "Merge new permanent info into existing global memory. Remove duplicates, resolve conflicts (favor new). \
-        Output a single dense paragraph.\n\n[NEW]\n{}\n\n[EXISTING]\n{}", new_perm, old_global
+        "Merge new permanent info into existing global memory. \
+        CRITICAL RULES: \
+        1. ONLY keep core identity, persona, long-term facts, constraints, and fundamental traits. \
+        2. ACTIVELY DELETE any trivial, conversational, temporary, or non-global details from both [NEW] and [EXISTING]. \
+        3. Remove duplicates and resolve conflicts (favoring new facts). \
+        4. Keep the result concise and bounded to prevent runaway length. Output a single dense paragraph.\n\n\
+        [NEW]\n{}\n\n[EXISTING]\n{}", new_perm, old_global
     );
     call_shadow_ai(api.0, api.1, api.2, prompt, false).await
 }

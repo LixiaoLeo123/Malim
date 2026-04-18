@@ -7,3 +7,7 @@
 /gen/schemas
 
 /src/translation/assets
+
+/src-tauri/.cargo
+
+/src-tauri/gen

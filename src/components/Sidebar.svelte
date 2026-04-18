@@ -420,7 +420,7 @@
                         <div class="px-3 py-2.5 flex flex-col gap-1.5 z-10 relative {article.stared ? 'pl-4' : ''}">
                             <div class="flex items-start justify-between gap-3">
                                 <h3
-                                    class="font-semibold text-zinc-800 text-[13.5px] leading-snug dark:text-zinc-200 line-clamp-2 pr-1"
+                                    class="font-semibold text-zinc-800 text-[13.5px] leading-snug dark:text-zinc-200 line-clamp-2 {isSelectMode ? 'pr-8' : 'pr-1'}"
                                 >
                                     {article.title || "Untitled"}
                                 </h3>
