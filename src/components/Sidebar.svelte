@@ -55,6 +55,7 @@
     let showMultiDeleteConfirm = false;
 
     function handleAdd() {
+        activeArticleId.set(null);
         currentView.set("editor");
         isSidebarOpen.set(false);
     }

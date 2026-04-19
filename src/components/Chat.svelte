@@ -211,6 +211,7 @@
 				apiUrl: config.apiUrl,
 				modelName: config.modelName,
 				concurrency: $settings.concurrency,
+				criticalValue: $settings.criticalValue,
 				ttsConcurrency: $settings.ttsConcurrency,
 				preCacheAudio: $settings.preCacheAudio,
 				ttsApi: $settings.ttsApi,
@@ -836,15 +837,17 @@
 		}, delay);
 	}
 
-	onMount(async () => {
-		await loadHistory();
-		if (!historyLoadedOnce) {
-			setTimeout(() => {
-				if (!historyLoadedOnce && messages.length === 0) {
-					loadHistory();
-				}
-			}, 1200);
-		}
+	onMount(() => {
+		setTimeout(async () => {
+			await loadHistory();
+			if (!historyLoadedOnce) {
+				setTimeout(() => {
+					if (!historyLoadedOnce && messages.length === 0) {
+						loadHistory();
+					}
+				}, 1200);
+			}
+		}, 1000);
 	});
 
 	onDestroy(() => {

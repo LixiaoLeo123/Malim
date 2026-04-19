@@ -44,6 +44,7 @@ const defaultSettings: Settings = {
   grammarAiConfigId: '',
 
   concurrency: 1,
+    criticalValue: 80,
   showGrammarNotes: true,
   autoSpeak: false,
   preCacheAudio: true,

@@ -65,6 +65,7 @@ export interface Settings {
   grammarAiConfigId: string; // Grammar Correction AI
 
   concurrency: number;
+  criticalValue: number;
   showGrammarNotes: boolean;
   autoSpeak: boolean;
   preCacheAudio: boolean;

@@ -63,6 +63,7 @@ export async function processQueue() {
             apiUrl: defaultConfig.apiUrl,
             modelName: defaultConfig.modelName,
             concurrency: currentSettings.concurrency,
+            criticalValue: currentSettings.criticalValue,
             ttsConcurrency: currentSettings.ttsConcurrency,
             preCacheAudio: currentSettings.preCacheAudio,
             ttsApi: currentSettings.ttsApi,

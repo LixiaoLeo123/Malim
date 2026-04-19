@@ -260,6 +260,288 @@ pub struct AiParsedResult {
     blocks: Vec<WordBlock>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BatchAiParsedItem {
+    index: usize,
+    translation: String,
+    blocks: Vec<WordBlock>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BatchAiParsedResult {
+    items: Vec<BatchAiParsedItem>,
+}
+
+fn count_sentence_units(text: &str) -> usize {
+    enum Mode {
+        None,
+        Word,
+        Punctuation,
+    }
+
+    let mut count = 0;
+    let mut mode = Mode::None;
+
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            mode = Mode::None;
+            continue;
+        }
+
+        if ch.is_alphanumeric() || ch == '\'' || ch == '’' || ch == '-' {
+            if !matches!(mode, Mode::Word) {
+                count += 1;
+                mode = Mode::Word;
+            }
+        } else if !matches!(mode, Mode::Punctuation) {
+            count += 1;
+            mode = Mode::Punctuation;
+        }
+    }
+
+    count
+}
+
+fn bfd_grouping(items: &[(usize, usize)], capacity: usize) -> Vec<Vec<usize>> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    if capacity == 0 {
+        return items.iter().map(|(index, _)| vec![*index]).collect();
+    }
+
+    let mut sorted_items = items.to_vec();
+    sorted_items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+    let mut bins: Vec<(usize, Vec<usize>)> = Vec::new();
+
+    for (index, weight) in sorted_items {
+        if weight > capacity {
+            bins.push((weight, vec![index]));
+            continue;
+        }
+
+        let mut best_bin_index: Option<usize> = None;
+        let mut best_space_left = usize::MAX;
+
+        for (bin_index, (bin_weight, _)) in bins.iter().enumerate() {
+            if *bin_weight + weight <= capacity {
+                let space_left = capacity - (*bin_weight + weight);
+                if space_left < best_space_left {
+                    best_space_left = space_left;
+                    best_bin_index = Some(bin_index);
+                }
+            }
+        }
+
+        if let Some(bin_index) = best_bin_index {
+            bins[bin_index].0 += weight;
+            bins[bin_index].1.push(index);
+        } else {
+            bins.push((weight, vec![index]));
+        }
+    }
+
+    bins
+        .into_iter()
+        .map(|(_, mut group)| {
+            group.sort_unstable();
+            group
+        })
+        .collect()
+}
+
+fn split_into_k_groups(items: &[(usize, usize)], k: usize) -> Vec<Vec<usize>> {
+    if items.is_empty() || k == 0 {
+        return Vec::new();
+    }
+
+    let group_count = k.min(items.len());
+    let mut left = items.iter().map(|(_, weight)| *weight).max().unwrap_or(0);
+    let mut right = items.iter().map(|(_, weight)| *weight).sum::<usize>();
+
+    let can_split = |limit: usize| -> bool {
+        bfd_grouping(items, limit).len() <= group_count
+    };
+
+    while left < right {
+        let mid = left + (right - left) / 2;
+        if can_split(mid) {
+            right = mid;
+        } else {
+            left = mid + 1;
+        }
+    }
+
+    let limit = left;
+    let weight_map: HashMap<usize, usize> = items.iter().copied().collect();
+    let mut groups = bfd_grouping(items, limit);
+
+    while groups.len() < group_count {
+        let heaviest_group_index = match groups.iter().enumerate().max_by_key(|(_, group)| {
+            group.iter().map(|index| weight_map[index]).sum::<usize>()
+        }) {
+            Some((index, _)) => index,
+            None => break,
+        };
+
+        if groups[heaviest_group_index].len() <= 1 {
+            break;
+        }
+
+        let split_item_index = groups[heaviest_group_index]
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, index)| weight_map[index])
+            .map(|(position, _)| position)
+            .unwrap();
+
+        let split_item = groups[heaviest_group_index].remove(split_item_index);
+        groups.push(vec![split_item]);
+    }
+
+    groups
+}
+
+fn build_sentence_prompt(
+    lang: &str,
+    sentence: &str,
+    stress_mark: bool,
+    show_grammar_notes: bool,
+) -> String {
+    build_prompt(lang, sentence, stress_mark, show_grammar_notes)
+}
+
+fn build_batch_prompt(
+    lang: &str,
+    sentences: &[(usize, String)],
+    stress_mark: bool,
+    show_grammar_notes: bool,
+) -> String {
+    let mut prompt = String::with_capacity(4096);
+
+    prompt.push_str("STRICT RULES:\n");
+    prompt.push_str("1. Output must be a single, valid JSON object.\n");
+    prompt.push_str("2. The JSON object must contain one key: 'items'.\n");
+    prompt.push_str("3. 'items' must be an array of objects.\n");
+    prompt.push_str("4. Each item must include: index, translation, blocks.\n");
+    prompt.push_str("5. The 'index' field must match the input sentence index.\n");
+    prompt.push_str("6. Do not merge or reorder sentences.\n\n");
+
+    match lang {
+        "KR" => {
+            prompt.push_str("Task: Korean morphological analysis.\n");
+            prompt.push_str("RULES:\n");
+            prompt.push_str("- Do NOT decompose Hangul characters (Jamo).\n");
+            prompt.push_str("- Output punctuation as separate blocks with pos 'punctuation'.\n");
+            prompt.push_str("POS: noun, pronoun, verb, adjective, adverb, particle, ending, punctuation, unknown.\n");
+            prompt.push_str("FIELDS: text, pos, definition, chinese_root (MANDATORY for Sino-Korean, else null)");
+            if show_grammar_notes {
+                prompt.push_str(", grammar_note");
+            }
+            prompt.push_str(".\n\n");
+
+            prompt.push_str(
+                r#"Example Output:
+{
+  "items": [
+    {
+      "index": 0,
+      "translation": "I go to school.",
+      "blocks": [
+        { "text": "학교", "pos": "noun", "definition": "school", "chinese_root": "学校" },
+        { "text": "에", "pos": "particle", "definition": "to", "chinese_root": null },
+        { "text": "갑니다", "pos": "verb", "definition": "go", "chinese_root": null },
+        { "text": ".", "pos": "punctuation", "definition": ".", "chinese_root": null }
+      ]
+    }
+  ]
+}
+
+"#,
+            );
+        }
+        "RU" => {
+            prompt.push_str("Task: Russian linguistic analysis.\n");
+            prompt.push_str("CORE: Context determines grammar. Analyze SYNTAX (verb government, prepositions, etc).\n");
+            prompt.push_str("POS: noun, verb, adjective, adverb, pronoun, preposition, conjunction, particle, punctuation, unknown.\n");
+            prompt.push_str("FIELDS (if meaningful): text, pos, definition, lemma, gram_case (1-7), gram_gender (m/f/n), gram_number (sg/pl), tense (pres/past/fut/imp/inf/gerund), aspect (pf/impf).\n");
+            prompt.push_str("RULES:\n");
+            prompt.push_str("- Nouns: Case depends on context and word form.\n");
+            prompt.push_str("- Adjectives: Omit case/gender/number. Participles=adjective.\n");
+            prompt.push_str("- Verbs: Lemma MUST be Infinitive (preserve aspect). Gerunds=verb(tense:gerund).\n");
+            prompt.push_str("- Pronouns: 1st/2nd person defaults to 'm'.\n");
+            if stress_mark {
+                prompt.push_str("- Stress: Add acute accents (´) to stressed vowels in 'text' and 'lemma'. NO stress on monosyllabic/English words.\n");
+            }
+            if show_grammar_notes {
+                prompt.push_str("- Grammar Note: Briefly explain syntactic role and why its form looks like this.\n");
+            }
+            prompt.push_str("\n");
+
+            prompt.push_str(
+                r#"Example Output:
+{
+  "items": [
+    {
+      "index": 0,
+      "translation": "He read the book on the table.",
+      "blocks": [
+        { "text": "Он", "pos": "pronoun", "definition": "he", "lemma": "он", "gram_case": 1, "gram_gender": "m", "gram_number": "sg" },
+        { "text": "прочитал", "pos": "verb", "definition": "read", "lemma": "прочитать", "tense": "past", "aspect": "pf" },
+        { "text": "книгу", "pos": "noun", "definition": "book", "lemma": "книга", "gram_case": 4, "gram_gender": "f", "gram_number": "sg" },
+        { "text": "на", "pos": "preposition", "definition": "on", "lemma": "на" },
+        { "text": "столе", "pos": "noun", "definition": "table", "lemma": "стол", "gram_case": 6, "gram_gender": "m", "gram_number": "sg" },
+        { "text": ".", "pos": "punctuation", "definition": "." }
+      ]
+    },
+    {
+      "index": 1,
+      "translation": "She is reading a book.",
+      "blocks": [
+        { "text": "Она", "pos": "pronoun", "definition": "she", "lemma": "она", "gram_case": 1, "gram_gender": "f", "gram_number": "sg" },
+        { "text": "читает", "pos": "verb", "definition": "read", "lemma": "читать", "tense": "pres", "aspect": "impf" },
+        { "text": "книгу", "pos": "noun", "definition": "book", "lemma": "книга", "gram_case": 4, "gram_gender": "f", "gram_number": "sg" },
+        { "text": ".", "pos": "punctuation", "definition": "." }
+      ]
+    }
+  ]
+}
+
+"#,
+            );
+        }
+        _ => {
+            prompt.push_str("Task: Sentence analysis (translation, tokenization, POS, definitions).\n\n");
+            prompt.push_str(
+                r#"Example Output:
+{
+  "items": [
+    {
+      "index": 0,
+      "translation": "Example translation.",
+      "blocks": [
+        { "text": "Example", "pos": "unknown", "definition": "Example" }
+      ]
+    }
+  ]
+}
+
+"#,
+            );
+        }
+    }
+
+    prompt.push_str("Sentences to analyze:\n");
+    for (index, sentence) in sentences {
+        let _ = writeln!(prompt, "- index {}: {}", index, sentence);
+    }
+    prompt.push_str("Output:");
+
+    prompt
+}
+
 // #[derive(Debug, Clone, Serialize, Deserialize)]
 // struct SentenceSplitResult {
 //     sentences: Vec<String>,
@@ -838,12 +1120,12 @@ async fn ensure_audio_cached(
 //     )
 // }
 
-async fn call_ai_api(
+async fn call_ai_api_content(
     api_key: &str,
     api_url: &str,
     model_name: &str,
     prompt: String,
-) -> Result<AiParsedResult, String> {
+) -> Result<String, String> {
     let client = reqwest::Client::new();
 
     let request_body = serde_json::json!({
@@ -894,16 +1176,56 @@ async fn call_ai_api(
     let content = json_res["choices"][0]["message"]["content"]
         .as_str()
         .ok_or("API returned an empty or invalid content field.")?;
-    let clean_content = content
+    Ok(content
         .trim()
         .trim_start_matches("```json")
         .trim_end_matches("```")
-        .trim();
+        .trim()
+        .to_string())
+}
 
-    let ai_parsed_result: AiParsedResult = serde_json::from_str(clean_content)
+async fn call_ai_api_single(
+    api_key: &str,
+    api_url: &str,
+    model_name: &str,
+    prompt: String,
+) -> Result<AiParsedResult, String> {
+    let clean_content = call_ai_api_content(api_key, api_url, model_name, prompt).await?;
+
+    let ai_parsed_result: AiParsedResult = serde_json::from_str(&clean_content)
         .map_err(|e| format!("Invalid JSON Structure: {}", e))?;
     Ok(ai_parsed_result)
 }
+
+async fn call_ai_api_batch(
+    api_key: &str,
+    api_url: &str,
+    model_name: &str,
+    prompt: String,
+) -> Result<Vec<(usize, AiParsedResult)>, String> {
+    let clean_content = call_ai_api_content(api_key, api_url, model_name, prompt).await?;
+
+    let batch_result: BatchAiParsedResult = serde_json::from_str(&clean_content)
+        .map_err(|e| format!("Invalid JSON Structure: {}", e))?;
+
+    let mut parsed = Vec::with_capacity(batch_result.items.len());
+    for item in batch_result.items {
+        parsed.push((
+            item.index,
+            AiParsedResult {
+                translation: item.translation,
+                blocks: item.blocks,
+            },
+        ));
+    }
+
+    Ok(parsed)
+}
+
+
+
+
+
 
 // for parse_text task
 #[derive(Debug, Clone)]
@@ -925,11 +1247,280 @@ struct TaskContext {
     ruaccent_url: String,
 }
 
+#[derive(Clone)]
+enum SentenceAnalysis {
+    Punctuation,
+    Parsed {
+        blocks: Vec<WordBlock>,
+        translation: String,
+    },
+    Error(String),
+}
+
+struct SentencePreflight {
+    sentence_audio_handle: Option<task::JoinHandle<Option<String>>>,
+    sentence_accent_handle: Option<task::JoinHandle<Option<String>>>,
+}
+
+async fn build_sentence_result(
+    ctx: TaskContext,
+    raw: String,
+    i: usize,
+    total: usize,
+    analysis: SentenceAnalysis,
+    sentence_preflight: SentencePreflight,
+    pre_cache_audio: bool,
+    tts_concurrency: usize,
+    ruaccent_enabled: bool,
+) -> (usize, Sentence) {
+    let SentencePreflight {
+        sentence_audio_handle,
+        sentence_accent_handle,
+    } = sentence_preflight;
+
+    let has_text_content = raw.chars().any(|c| c.is_alphanumeric());
+
+    let is_ru = ctx.language.to_lowercase() == "ru" || ctx.language.to_lowercase() == "russian";
+
+    let align_accents = |blocks: &mut Vec<WordBlock>, accented_sentence: String| {
+        let mut accented_iter = accented_sentence.chars().peekable();
+        let chars_match = |a: char, b: char| -> bool {
+            if a == b {
+                return true;
+            }
+            let a_low = a.to_lowercase().next();
+            let b_low = b.to_lowercase().next();
+            a_low == b_low || (a_low == Some('ё') && b_low == Some('е')) || (a_low == Some('е') && b_low == Some('ё'))
+        };
+
+        for block in blocks {
+            let clean_block = block.text.replace('\u{0301}', "");
+            let mut new_text = String::new();
+
+            for bc in clean_block.chars() {
+                let mut matched = false;
+                while let Some(&ac) = accented_iter.peek() {
+                    if ac == '\u{0301}' {
+                        new_text.push(accented_iter.next().unwrap());
+                    } else if chars_match(ac, bc) {
+                        new_text.push(accented_iter.next().unwrap());
+                        matched = true;
+                        break;
+                    } else {
+                        accented_iter.next();
+                    }
+                }
+                if !matched {
+                    new_text.push(bc);
+                }
+            }
+
+            while let Some(&next_c) = accented_iter.peek() {
+                if next_c == '\u{0301}' {
+                    new_text.push(accented_iter.next().unwrap());
+                } else {
+                    break;
+                }
+            }
+
+            block.text = new_text;
+        }
+    };
+
+    let lemma_needs_accent = |lemma: &str| {
+        let mut vowel_count = 0;
+
+        for ch in lemma.chars().filter(|c| *c != '\u{0301}') {
+            match ch.to_lowercase().next().unwrap_or(ch) {
+                'а' | 'е' | 'ё' | 'и' | 'о' | 'у' | 'ы' | 'э' | 'ю' | 'я' => {
+                    vowel_count += 1;
+                }
+                _ => {}
+            }
+        }
+
+        vowel_count >= 2 && !lemma.contains('\u{0301}') && !lemma.contains('ё')
+    };
+
+    let (mut blocks, translation) = match analysis {
+        SentenceAnalysis::Punctuation => (
+            vec![WordBlock {
+                text: raw.clone(),
+                pos: "punctuation".to_string(),
+                definition: "".to_string(),
+                chinese_root: None,
+                grammar_note: None,
+                audio_path: None,
+                lemma: None,
+                gram_case: None,
+                gram_gender: None,
+                gram_number: None,
+                tense: None,
+                aspect: None,
+            }],
+            raw.clone(),
+        ),
+        SentenceAnalysis::Parsed { blocks, translation } => (blocks, translation),
+        SentenceAnalysis::Error(err) => (
+            vec![WordBlock {
+                text: raw.clone(),
+                pos: "error".to_string(),
+                definition: format!("Error: {}", err),
+                chinese_root: None,
+                grammar_note: None,
+                audio_path: None,
+                lemma: None,
+                gram_case: None,
+                gram_gender: None,
+                gram_number: None,
+                tense: None,
+                aspect: None,
+            }],
+            "Translation unavailable due to error.".to_string(),
+        ),
+    };
+
+    let has_text_accents = blocks.iter().any(|block| block.text.contains('\u{0301}'));
+    let accent_opt = match sentence_accent_handle {
+        Some(handle) => handle.await.ok().flatten(),
+        None => {
+            if is_ru && ruaccent_enabled && has_text_content && !has_text_accents {
+                fetch_accented_text(&raw.replace('\u{0301}', ""), &ctx.ruaccent_url)
+                    .await
+                    .ok()
+            } else {
+                None
+            }
+        }
+    };
+    if let Some(accented_sentence) = accent_opt {
+        align_accents(&mut blocks, accented_sentence);
+    }
+
+    let mut lemma_accent_task = None;
+    if ruaccent_enabled && is_ru {
+        let lemmas_to_accentize: Vec<(usize, String)> = blocks
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, block)| {
+                block
+                    .lemma
+                    .clone()
+                    .filter(|lemma| lemma_needs_accent(lemma))
+                    .map(|lemma| (idx, lemma))
+            })
+            .collect();
+
+        let ruaccent_url_for_lemma = ctx.ruaccent_url.clone();
+        lemma_accent_task = Some(tokio::spawn(async move {
+            if !lemmas_to_accentize.is_empty() {
+                stream::iter(lemmas_to_accentize)
+                    .map(|(idx, lemma)| {
+                        let url = ruaccent_url_for_lemma.clone();
+                        async move {
+                            let clean_lemma = lemma.replace('\u{0301}', "");
+                            let accented = fetch_accented_text(&clean_lemma, &url)
+                                .await
+                                .unwrap_or(lemma);
+                            (idx, accented)
+                        }
+                    })
+                    .buffer_unordered(8)
+                    .collect::<Vec<_>>()
+                    .await
+            } else {
+                Vec::new()
+            }
+        }));
+    }
+
+    let mut sentence_audio = None;
+    if pre_cache_audio {
+        let inner = tts_concurrency.min(8).max(1);
+
+        let block_inputs: Vec<(usize, String, String)> = blocks
+            .iter()
+            .enumerate()
+            .map(|(idx, b)| (idx, b.text.clone(), b.pos.clone()))
+            .collect();
+
+        let ctx = ctx.clone();
+        let block_paths: Vec<(usize, Option<String>)> = stream::iter(block_inputs)
+            .map(move |(idx, text, pos)| {
+                let ctx = ctx.clone();
+                async move {
+                    if pos == "punctuation" || text.trim().is_empty() {
+                        return (idx, None);
+                    }
+
+                    let p = ensure_audio_cached(
+                        ctx.app,
+                        ctx.id,
+                        ctx.language,
+                        text,
+                        "block",
+                        ctx.tts_sem,
+                        ctx.tts_locks,
+                        ctx.tts_api,
+                        ctx.qwen_api_key,
+                        ctx.qwen_voice,
+                        ctx.silero_tts_url,
+                    )
+                    .await
+                    .ok();
+
+                    (idx, p)
+                }
+            })
+            .buffer_unordered(inner)
+            .collect()
+            .await;
+
+        for (idx, p) in block_paths {
+            blocks[idx].audio_path = p;
+        }
+
+        sentence_audio = match sentence_audio_handle {
+            None => None,
+            Some(handle) => handle.await.ok().flatten(),
+        };
+    }
+
+    if let Some(task) = lemma_accent_task {
+        if let Ok(accented_lemmas) = task.await {
+            for (idx, accented_lemma) in accented_lemmas {
+                blocks[idx].lemma = Some(accented_lemma);
+            }
+        }
+    }
+
+    let sentence = Sentence {
+        id: format!("{}_{}", ctx.id, i),
+        original: raw.clone(),
+        blocks,
+        translation,
+        audio_path: sentence_audio,
+    };
+
+    let current = ctx.completed.fetch_add(1, Ordering::SeqCst) + 1;
+    let _ = ctx.app.emit(
+        "parsing-progress",
+        ProgressPayload {
+            id: ctx.id.to_string(),
+            current,
+            total,
+            percent: ((current as f32 / total as f32) * 100.0) as u32,
+        },
+    );
+
+    (i, sentence)
+}
+
 //major func
 #[tauri::command]
 async fn parse_text(
     app: AppHandle,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     id: String,
     text: String,
     language: String,
@@ -937,6 +1528,7 @@ async fn parse_text(
     api_url: String,
     model_name: String,
     concurrency: usize,
+    critical_value: usize,
     pre_cache_audio: bool,
     tts_concurrency: usize,
     tts_api: String,
@@ -952,6 +1544,8 @@ async fn parse_text(
         return Err("API Key is missing".to_string());
     }
     let language = language.trim().to_uppercase();
+    let concurrency = concurrency.max(1);
+    let critical_value = critical_value.max(1);
 
     let mut old_map = HashMap::new();
     if let Some(old) = old_sentences {
@@ -986,10 +1580,19 @@ async fn parse_text(
         raw_sentences.push(trimmed.to_string());
     }
 
-    dbg!(&language);
-    dbg!(&raw_sentences);
-
     let total = raw_sentences.len();
+    let raw_sentences = Arc::new(raw_sentences);
+
+    let sentence_weights: Vec<(usize, usize)> = raw_sentences
+        .iter()
+        .enumerate()
+        .map(|(index, sentence)| (index, count_sentence_units(sentence)))
+        .collect();
+
+    let mut groups = bfd_grouping(&sentence_weights, critical_value);
+    if groups.len() <= concurrency {
+        groups = split_into_k_groups(&sentence_weights, concurrency);
+    }
 
     let completed = Arc::new(AtomicUsize::new(0));
     let tts_sem = Arc::new(Semaphore::new(tts_concurrency.max(1)));
@@ -1012,335 +1615,198 @@ async fn parse_text(
         silero_tts_url,
         ruaccent_url,
     };
-    let tasks = raw_sentences.into_iter().enumerate().map(|(i, raw)| {
+
+    let tasks = groups.into_iter().map(|group_indices| {
         let ctx = ctx.clone();
+        let raw_sentences = Arc::clone(&raw_sentences);
         async move {
-            let has_text_content = raw.chars().any(|c| c.is_alphanumeric());
+            let mut analyses: HashMap<usize, SentenceAnalysis> = HashMap::new();
+            let mut preflights: HashMap<usize, SentencePreflight> = HashMap::new();
+            let mut pending_sentences: Vec<(usize, String)> = Vec::new();
+            let is_ru = ctx.language.to_lowercase() == "ru" || ctx.language.to_lowercase() == "russian";
 
-            let sentence_handle = if pre_cache_audio && has_text_content {
-                let ctx = ctx.clone();
-                let raw = raw.clone();
-                Some(tokio::spawn(async move {
-                    ensure_audio_cached(
-                        ctx.app,
-                        ctx.id,
-                        ctx.language,
-                        raw,
-                        "sentence",
-                        ctx.tts_sem,
-                        ctx.tts_locks,
-                        ctx.tts_api,
-                        ctx.qwen_api_key,
-                        ctx.qwen_voice,
-                        ctx.silero_tts_url,
-                    )
-                    .await
-                    .ok()
-                }))
-            } else {
-                None
-            };
+            for &sentence_index in &group_indices {
+                let raw = raw_sentences[sentence_index].clone();
+                let has_text_content = raw.chars().any(|c| c.is_alphanumeric());
+                let cached = ctx.old_map.get(&raw).cloned();
 
-            let is_ru =
-                ctx.language.to_lowercase() == "ru" || ctx.language.to_lowercase() == "russian";
-            let cached = ctx.old_map.get(&raw).cloned();
-            let mut lemma_accent_task = None;
-
-            let align_accents = |blocks: &mut Vec<WordBlock>, accented_sentence: String| {
-                let mut accented_iter = accented_sentence.chars().peekable();
-                let chars_match = |a: char, b: char| -> bool {
-                    if a == b {
-                        return true;
-                    }
-                    let a_low = a.to_lowercase().next();
-                    let b_low = b.to_lowercase().next();
-                    a_low == b_low
-                        || (a_low == Some('ё') && b_low == Some('е'))
-                        || (a_low == Some('е') && b_low == Some('ё'))
+                let sentence_audio_handle = if pre_cache_audio && has_text_content {
+                    let ctx = ctx.clone();
+                    let raw = raw.clone();
+                    Some(tokio::spawn(async move {
+                        ensure_audio_cached(
+                            ctx.app,
+                            ctx.id,
+                            ctx.language,
+                            raw,
+                            "sentence",
+                            ctx.tts_sem,
+                            ctx.tts_locks,
+                            ctx.tts_api,
+                            ctx.qwen_api_key,
+                            ctx.qwen_voice,
+                            ctx.silero_tts_url,
+                        )
+                        .await
+                        .ok()
+                    }))
+                } else {
+                    None
                 };
 
-                for block in blocks {
-                    let clean_block = block.text.replace('\u{0301}', "");
-                    let mut new_text = String::new();
+                let sentence_accent_handle = if is_ru && ruaccent_enabled && has_text_content {
+                    let needs_accent = cached.as_ref().map_or(true, |sent| {
+                        !sent.blocks.iter().any(|block| block.text.contains('\u{0301}'))
+                    });
 
-                    for bc in clean_block.chars() {
-                        let mut matched = false;
-                        while let Some(&ac) = accented_iter.peek() {
-                            if ac == '\u{0301}' {
-                                new_text.push(accented_iter.next().unwrap());
-                            } else if chars_match(ac, bc) {
-                                new_text.push(accented_iter.next().unwrap());
-                                matched = true;
-                                break;
-                            } else {
-                                accented_iter.next();
-                            }
-                        }
-                        if !matched {
-                            new_text.push(bc);
-                        }
-                    }
-
-                    while let Some(&next_c) = accented_iter.peek() {
-                        if next_c == '\u{0301}' {
-                            new_text.push(accented_iter.next().unwrap());
-                        } else {
-                            break;
-                        }
-                    }
-
-                    block.text = new_text;
-                }
-            };
-
-            let lemma_needs_accent = |lemma: &str| {
-                let mut vowel_count = 0;
-
-                for ch in lemma.chars().filter(|c| *c != '\u{0301}') {
-                    match ch.to_lowercase().next().unwrap_or(ch) {
-                        'а' | 'е' | 'ё' | 'и' | 'о' | 'у' | 'ы' | 'э' | 'ю' | 'я' => {
-                            vowel_count += 1;
-                        }
-                        _ => {}
-                    }
-                }
-
-                vowel_count >= 2 && !lemma.contains('\u{0301}') && !lemma.contains('ё')
-            };
-
-            let (mut blocks, translation) = if !has_text_content {
-                (
-                    vec![WordBlock {
-                        text: raw.clone(),
-                        pos: "punctuation".to_string(),
-                        definition: "".to_string(),
-                        chinese_root: None,
-                        grammar_note: None,
-                        audio_path: None,
-                        lemma: None,
-                        gram_case: None,
-                        gram_gender: None,
-                        gram_number: None,
-                        tense: None,
-                        aspect: None,
-                    }],
-                    raw.clone(),
-                )
-            } else if cached.as_ref().map_or(false, |b| {
-                b.blocks.last().map_or(false, |last| last.pos != "error")
-            }) {
-                let mut b = cached.unwrap();
-                let has_text_accents = b.blocks.iter().any(|block| block.text.contains('\u{0301}'));
-                if is_ru && ruaccent_enabled {
-                    if !has_text_accents {
-                        let clean_raw = raw.replace('\u{0301}', "");
-                        if let Ok(accented_sentence) =
-                            fetch_accented_text(&clean_raw, &ctx.ruaccent_url).await
-                        {
-                            align_accents(&mut b.blocks, accented_sentence);
-                        }
-                    }
-                    let lemmas_to_accentize: Vec<(usize, String)> = b
-                        .blocks
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, block)| block.lemma.clone().filter(|l| lemma_needs_accent(l)).map(|l| (i, l)))
-                        .collect();
-
-                    let ruaccent_url_for_lemma = ctx.ruaccent_url.clone();
-                    lemma_accent_task = Some(tokio::spawn(async move {
-                        if !lemmas_to_accentize.is_empty() {
-                            stream::iter(lemmas_to_accentize)
-                                .map(|(idx, lemma)| {
-                                    let url = ruaccent_url_for_lemma.clone();
-                                    async move {
-                                        let clean_lemma = lemma.replace('\u{0301}', "");
-                                        let accented = fetch_accented_text(&clean_lemma, &url)
-                                            .await
-                                            .unwrap_or(lemma);
-                                        (idx, accented)
-                                    }
-                                })
-                                .buffer_unordered(8)
-                                .collect::<Vec<_>>()
+                    if needs_accent {
+                        let ctx = ctx.clone();
+                        let raw = raw.clone();
+                        Some(tokio::spawn(async move {
+                            fetch_accented_text(&raw.replace('\u{0301}', ""), &ctx.ruaccent_url)
                                 .await
-                        } else {
-                            Vec::new()
-                        }
-                    }));
-                }
-
-                (b.blocks, b.translation)
-            } else {
-                let clean_raw = raw.replace('\u{0301}', "");
-                let prompt =
-                    build_prompt(&ctx.language, &raw, !ruaccent_enabled, show_grammar_notes);
-                let ai_future = call_ai_api(&ctx.api_key, &ctx.api_url, &ctx.model_name, prompt);
-
-                let accent_future = async {
-                    if is_ru && ruaccent_enabled {
-                        fetch_accented_text(&clean_raw, &ctx.ruaccent_url)
-                            .await
-                            .ok()
+                                .ok()
+                        }))
                     } else {
                         None
                     }
+                } else {
+                    None
                 };
 
-                let (ai_result, accent_opt) = tokio::join!(ai_future, accent_future);
+                preflights.insert(
+                    sentence_index,
+                    SentencePreflight {
+                        sentence_audio_handle,
+                        sentence_accent_handle,
+                    },
+                );
 
-                let (mut new_blocks, new_trans) = match ai_result {
-                    Ok(res) => (res.blocks, res.translation),
-                    Err(err) => (
-                        vec![WordBlock {
-                            text: raw.clone(),
-                            pos: "error".to_string(),
-                            definition: format!("Error: {}", err),
-                            chinese_root: None,
-                            grammar_note: None,
-                            audio_path: None,
-                            lemma: None,
-                            gram_case: None,
-                            gram_gender: None,
-                            gram_number: None,
-                            tense: None,
-                            aspect: None,
-                        }],
-                        "Translation unavailable due to error.".to_string(),
-                    ),
-                };
-                if let Some(accented_sentence) = accent_opt {
-                    align_accents(&mut new_blocks, accented_sentence);
+                if !has_text_content {
+                    analyses.insert(sentence_index, SentenceAnalysis::Punctuation);
+                    continue;
                 }
 
-                if ruaccent_enabled && is_ru {
-                    let lemmas_to_accentize: Vec<(usize, String)> = new_blocks
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, b)| b.lemma.clone().filter(|l| lemma_needs_accent(l)).map(|l| (i, l)))
-                        .collect();
-
-                    let ruaccent_url_for_lemma = ctx.ruaccent_url.clone();
-
-                    lemma_accent_task = Some(tokio::spawn(async move {
-                        if !lemmas_to_accentize.is_empty() {
-                            stream::iter(lemmas_to_accentize)
-                                .map(|(idx, lemma)| {
-                                    let url = ruaccent_url_for_lemma.clone();
-                                    async move {
-                                        let clean_lemma = lemma.replace('\u{0301}', "");
-                                        let accented = fetch_accented_text(&clean_lemma, &url)
-                                            .await
-                                            .unwrap_or(lemma);
-                                        (idx, accented)
-                                    }
-                                })
-                                .buffer_unordered(8)
-                                .collect::<Vec<_>>()
-                                .await
-                        } else {
-                            Vec::new()
-                        }
-                    }));
-                }
-                (new_blocks, new_trans)
-            };
-            // --- audio ---
-            let mut sentence_audio = None;
-            if pre_cache_audio {
-                let inner = tts_concurrency.min(8).max(1);
-
-                let block_inputs: Vec<(usize, String, String)> = blocks
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, b)| (idx, b.text.clone(), b.pos.clone()))
-                    .collect();
-
-                let ctx = ctx.clone();
-                let block_paths: Vec<(usize, Option<String>)> = stream::iter(block_inputs)
-                    .map(move |(idx, text, pos)| {
-                        let ctx = ctx.clone();
-                        async move {
-                            if pos == "punctuation" || text.trim().is_empty() {
-                                return (idx, None);
-                            }
-
-                            // the text here contains stress marks for Russian
-                            let p = ensure_audio_cached(
-                                ctx.app,
-                                ctx.id,
-                                ctx.language,
-                                text,
-                                "block",
-                                ctx.tts_sem,
-                                ctx.tts_locks,
-                                ctx.tts_api,
-                                ctx.qwen_api_key,
-                                ctx.qwen_voice,
-                                ctx.silero_tts_url,
-                            )
-                            .await
-                            .ok();
-
-                            (idx, p)
-                        }
-                    })
-                    .buffer_unordered(inner)
-                    .collect()
-                    .await;
-
-                for (idx, p) in block_paths {
-                    blocks[idx].audio_path = p;
+                if let Some(cached) = cached {
+                    if cached
+                        .blocks
+                        .last()
+                        .map_or(false, |last| last.pos != "error")
+                    {
+                        analyses.insert(
+                            sentence_index,
+                            SentenceAnalysis::Parsed {
+                                blocks: cached.blocks,
+                                translation: cached.translation,
+                            },
+                        );
+                        continue;
+                    }
                 }
 
-                sentence_audio = match sentence_handle {
-                    None => None,
-                    Some(handle) => handle.await.ok().flatten(),
-                };
+                pending_sentences.push((sentence_index, raw));
             }
-            // collect result from lemma accent task
-            if let Some(task) = lemma_accent_task {
-                if let Ok(accented_lemmas) = task.await {
-                    for (idx, accented_lemma) in accented_lemmas {
-                        blocks[idx].lemma = Some(accented_lemma);
+
+            if !pending_sentences.is_empty() {
+                if pending_sentences.len() == 1 {
+                    let (sentence_index, raw) = pending_sentences.remove(0);
+                    let prompt = build_sentence_prompt(&ctx.language, &raw, !ruaccent_enabled, show_grammar_notes);
+                    let analysis = match call_ai_api_single(&ctx.api_key, &ctx.api_url, &ctx.model_name, prompt).await {
+                        Ok(result) => SentenceAnalysis::Parsed {
+                            blocks: result.blocks,
+                            translation: result.translation,
+                        },
+                        Err(err) => SentenceAnalysis::Error(err),
+                    };
+                    analyses.insert(sentence_index, analysis);
+                } else {
+                    let prompt = build_batch_prompt(&ctx.language, &pending_sentences, !ruaccent_enabled, show_grammar_notes);
+                    match call_ai_api_batch(&ctx.api_key, &ctx.api_url, &ctx.model_name, prompt).await {
+                        Ok(items) => {
+                            let mut result_map: HashMap<usize, AiParsedResult> = items
+                                .into_iter()
+                                .map(|(index, item)| (index, item))
+                                .collect();
+
+                            for (sentence_index, _) in pending_sentences {
+                                if let Some(result) = result_map.remove(&sentence_index) {
+                                    analyses.insert(
+                                        sentence_index,
+                                        SentenceAnalysis::Parsed {
+                                            blocks: result.blocks,
+                                            translation: result.translation,
+                                        },
+                                    );
+                                } else {
+                                    analyses.insert(
+                                        sentence_index,
+                                        SentenceAnalysis::Error(
+                                            "Batch AI response is missing one sentence result.".to_string(),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            for (sentence_index, _) in pending_sentences {
+                                analyses.insert(sentence_index, SentenceAnalysis::Error(err.clone()));
+                            }
+                        }
                     }
                 }
             }
 
-            let sentence = Sentence {
-                id: format!("{}_{}", ctx.id, i),
-                original: raw.clone(),
-                blocks,
-                translation,
-                audio_path: sentence_audio,
-            };
+            let mut group_results = Vec::new();
+            for &sentence_index in &group_indices {
+                let raw = raw_sentences[sentence_index].clone();
+                let analysis = analyses.remove(&sentence_index).unwrap_or_else(|| {
+                    if raw.chars().any(|c| c.is_alphanumeric()) {
+                        SentenceAnalysis::Error("Missing analysis result.".to_string())
+                    } else {
+                        SentenceAnalysis::Punctuation
+                    }
+                });
+                let sentence_preflight = preflights.remove(&sentence_index).unwrap_or(SentencePreflight {
+                    sentence_audio_handle: None,
+                    sentence_accent_handle: None,
+                });
 
-            let current = ctx.completed.fetch_add(1, Ordering::SeqCst) + 1;
-            let _ = ctx.app.emit(
-                "parsing-progress",
-                ProgressPayload {
-                    id: ctx.id.to_string(),
-                    current,
+                let result = build_sentence_result(
+                    ctx.clone(),
+                    raw,
+                    sentence_index,
                     total,
-                    percent: ((current as f32 / total as f32) * 100.0) as u32,
-                },
-            );
+                    analysis,
+                    sentence_preflight,
+                    pre_cache_audio,
+                    tts_concurrency,
+                    ruaccent_enabled,
+                )
+                .await;
+                group_results.push(result);
+            }
 
-            (i, sentence)
+            group_results
         }
     });
 
-    let mut unordered_results: Vec<(usize, Sentence)> = stream::iter(tasks)
+    let mut unordered_results: Vec<Vec<(usize, Sentence)>> = stream::iter(tasks)
         .buffer_unordered(concurrency)
         .collect()
         .await;
 
-    unordered_results.sort_by_key(|(i, _)| *i);
-    let results: Vec<Sentence> = unordered_results.into_iter().map(|(_, s)| s).collect();
+    let mut flattened_results: Vec<(usize, Sentence)> = unordered_results
+        .drain(..)
+        .flatten()
+        .collect();
+
+    flattened_results.sort_by_key(|(i, _)| *i);
+    let results: Vec<Sentence> = flattened_results.into_iter().map(|(_, s)| s).collect();
 
     Ok(results)
 }
 
+#[allow(dead_code)]
 #[derive(Serialize, Deserialize)]
 struct AppData {
     articles: serde_json::Value,

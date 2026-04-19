@@ -75,6 +75,7 @@
     };
 
     let tempConcurrency = 1;
+    let tempCriticalValue = 80;
     let tempAutoSpeak = true;
     let tempPreCacheAudio = true;
     let tempTtsConcurrency = 1;
@@ -107,6 +108,7 @@
         };
 
         tempConcurrency = $settings.concurrency;
+        tempCriticalValue = $settings.criticalValue;
         tempAutoSpeak = $settings.autoSpeak;
         tempPreCacheAudio = $settings.preCacheAudio;
         tempTtsConcurrency = $settings.ttsConcurrency;
@@ -279,6 +281,7 @@
             grammarAiConfigId: selectedIds.grammar,
 
             concurrency: tempConcurrency,
+            criticalValue: tempCriticalValue,
             autoSpeak: tempAutoSpeak,
             preCacheAudio: tempPreCacheAudio,
             ttsConcurrency: tempTtsConcurrency,
@@ -469,7 +472,7 @@
                     Role Assignment
                 </h3>
                 {#if tempAiConfigList.length === 0}
-                    <p class="text-xs text-zinc-400">
+                    <p class="text-sm text-zinc-400">
                         Please add at least one AI Profile above.
                     </p>
                 {:else}
@@ -483,7 +486,7 @@
                             >
                                 <div class="flex-1 min-w-0">
                                     <div
-                                        class="text-xs font-medium text-zinc-700 dark:text-zinc-200"
+                                        class="text-sm font-medium text-zinc-700 dark:text-zinc-200"
                                     >
                                         {role.label}
                                     </div>
@@ -499,7 +502,7 @@
                                             openRoleSelector[role.key] =
                                                 !openRoleSelector[role.key];
                                         }}
-                                        class="w-full flex items-center justify-between px-3 py-1.5 text-xs font-medium bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-800 transition text-zinc-700 dark:text-zinc-200"
+                                        class="w-full flex items-center justify-between px-3 py-1.5 text-sm font-medium bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-800 transition text-zinc-700 dark:text-zinc-200"
                                     >
                                         <span class="truncate">
                                             {selectedConfig
@@ -507,7 +510,7 @@
                                                 : "Select..."}
                                         </span>
                                         <ChevronDown
-                                            size={12}
+                                            size={16}
                                             class="transition-transform duration-200 {openRoleSelector[
                                                 role.key
                                             ]
@@ -519,7 +522,7 @@
                                     {#if openRoleSelector[role.key]}
                                         <div
                                             transition:slide={{ duration: 200 }}
-                                            class="absolute z-50 mt-1 w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-xl overflow-hidden text-xs"
+                                            class="absolute z-50 mt-1 w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-xl overflow-hidden text-sm"
                                         >
                                             {#each tempAiConfigList as c}
                                                 <button
@@ -571,7 +574,7 @@
 
             <label class="block mt-3 mb-4">
                 <span
-                    class="block text-sm font-medium text-zinc-600 mb-1 dark:text-zinc-300"
+                    class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
                 >
                     Concurrency
                 </span>
@@ -596,6 +599,26 @@
                         margin: 0;
                     }
                 </style>
+            </label>
+
+            <label class="block mt-3 mb-4">
+                <span
+                    class="block text-xs font-medium text-zinc-500 mb-1 dark:text-zinc-400"
+                >
+                    Sentence Group Critical Value
+                </span>
+                <input
+                    type="number"
+                    bind:value={tempCriticalValue}
+                    min={1}
+                    max={500}
+                    step={1}
+                    class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
+                    style="appearance: textfield; -moz-appearance: textfield;"
+                />
+                <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    Recommended: 80. Larger values allow longer AI batches.
+                </p>
             </label>
 
             <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
