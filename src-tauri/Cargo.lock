@@ -3015,6 +3015,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rodio",
  "roxmltree",
+ "rs-mdict",
  "rsmorphy",
  "rsmorphy-dict-ru",
  "rusqlite",
@@ -3116,6 +3117,15 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "minilzo-rs"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c71a19a4b57d7712a7946e51a7a998f1d8252e16000706ae63243e951fcfce09"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "minimal-lexical"
@@ -4919,6 +4929,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "rs-mdict"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3d020651142866d554f182efc49e2e798f0ef9db4522df527729cc16d1fcc2"
+dependencies = [
+ "base64 0.22.1",
+ "encoding_rs",
+ "flate2",
+ "minilzo-rs",
+ "regex",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -4,7 +4,7 @@
     import Flag from "./Flag.svelte";
     import StatsModal from "./StatsModal.svelte";
     import PromptGenerator from "./PromptGenerator.svelte";
-    import { Globe, MessageCircle, Star } from "lucide-svelte";
+    import { Globe, MessageCircle, Star, Languages, BookOpenText } from "lucide-svelte";
     import {
         articles,
         activeArticleId,
@@ -67,6 +67,16 @@
 
     function handleChat() {
         currentView.set("chat");
+        isSidebarOpen.set(false);
+    }
+
+    function handleTranslator() {
+        currentView.set("translator");
+        isSidebarOpen.set(false);
+    }
+
+    function handleDictionary() {
+        currentView.set("dictionary");
         isSidebarOpen.set(false);
     }
 
@@ -217,22 +227,15 @@
     <div
         class="px-5 py-4 flex justify-between items-center bg-[#f9fafb]/90 dark:bg-[#0f0f11]/90 backdrop-blur-md sticky top-0 z-20 pt-[calc(env(safe-area-inset-top)+1rem)] border-b border-zinc-100 dark:border-zinc-900/50 shadow-sm transition-all"
     >
-        <div
+        <button
+            type="button"
             class="group flex items-center gap-3 cursor-pointer select-none"
             on:click={() => (showBrain = true)}
         >
-            <div
-                class="w-[30px] h-[30px] bg-zinc-900 dark:bg-white rounded-[10px] flex items-center justify-center flex-shrink-0 transition-transform duration-400 ease-out group-hover:scale-[1.05] group-hover:rotate-3 shadow-sm active:scale-95"
-            >
-                <span
-                    class="text-white dark:text-zinc-900 text-[16px] font-black pointer-events-none transform transition-transform group-hover:-rotate-3"
-                    >말</span
-                >
-            </div>
-            <span class="font-extrabold text-[22px] tracking-tight text-zinc-900 dark:text-zinc-50 transition-colors duration-300">
-                Malim
+            <span class="font-extrabold text-[22px] tracking-tight text-zinc-900 dark:text-white transition-all duration-300 transform group-hover:scale-[1.02] group-active:scale-95">
+                Malim<span class="text-[#660874] dark:text-[#8857e1]">.</span>
             </span>
-        </div>
+        </button>
 
         <div class="flex items-center gap-1">
             {#if showSyncButton}
@@ -327,6 +330,18 @@
                 <div class="flex items-center gap-3">
                     <MessageCircle size={18} class="text-emerald-500/80 group-hover:text-emerald-500 transition-colors" opacity={0.9} />
                     <span class="font-semibold text-[14px]">AI Chat</span>
+                </div>
+            </button>
+            <button on:click={handleTranslator} class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-zinc-700 dark:text-zinc-300 hover:bg-white dark:hover:bg-zinc-900 transition-all hover:shadow-sm border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 active:scale-[0.98] group">
+                <div class="flex items-center gap-3">
+                    <Languages size={18} class="text-sky-500/80 group-hover:text-sky-500 transition-colors" opacity={0.9} />
+                    <span class="font-semibold text-[14px]">Translator Lab</span>
+                </div>
+            </button>
+            <button on:click={handleDictionary} class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-zinc-700 dark:text-zinc-300 hover:bg-white dark:hover:bg-zinc-900 transition-all hover:shadow-sm border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 active:scale-[0.98] group">
+                <div class="flex items-center gap-3">
+                    <BookOpenText size={18} class="text-amber-500/80 group-hover:text-amber-500 transition-colors" opacity={0.9} />
+                    <span class="font-semibold text-[14px]">Dictionary</span>
                 </div>
             </button>
             <button on:click={() => (showPromptGenerator = true)} class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-zinc-700 dark:text-zinc-300 hover:bg-white dark:hover:bg-zinc-900 transition-all hover:shadow-sm border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 active:scale-[0.98] group">

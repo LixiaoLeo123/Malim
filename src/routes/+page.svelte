@@ -4,6 +4,8 @@
     import Reader from "../components/Reader.svelte";
     import Discover from "../components/Discover.svelte";
     import Chat from "../components/Chat.svelte";
+    import TranslatorLab from "../components/TranslatorLab.svelte";
+    import Dictionary from "../components/Dictionary.svelte";
     import { currentView, isSidebarOpen } from "../lib/stores";
     import { fade, fly } from "svelte/transition";
     import { cubicOut } from "svelte/easing";
@@ -77,7 +79,7 @@
     });
 </script>
 
-<main class="flex h-screen w-screen overflow-hidden {$currentView === 'chat' ? 'bg-[#f7f7f7] dark:bg-[#1b1a1b]' : 'bg-white dark:bg-zinc-950'} text-zinc-900 dark:text-zinc-100 pt-[env(safe-area-inset-top)] transition-colors duration-300">
+<main class="flex h-screen w-screen overflow-hidden {($currentView === 'chat' || $currentView === 'translator' || $currentView === 'dictionary') ? 'bg-[#f7f7f7] dark:bg-[#1b1a1b]' : 'bg-white dark:bg-zinc-950'} text-zinc-900 dark:text-zinc-100 pt-[env(safe-area-inset-top)] transition-colors duration-300">
     <div class="hidden md:block h-full w-80 shrink-0 z-20 border-r border-zinc-200 dark:border-zinc-800">
         <Sidebar />
     </div>
@@ -188,22 +190,31 @@
         <div class="absolute inset-0 transition-transform duration-300 ease-out z-10 bg-white dark:bg-zinc-950 {$currentView === 'chat' ? 'translate-x-0' : 'translate-x-full pointer-events-none shadow-none'}">
             <Chat />
         </div>
+        <div class="absolute inset-0 transition-transform duration-300 ease-out z-10 bg-white dark:bg-zinc-950 {$currentView === 'translator' ? 'translate-x-0' : 'translate-x-full pointer-events-none shadow-none'}">
+            <TranslatorLab />
+        </div>
+        <div class="absolute inset-0 transition-transform duration-300 ease-out z-10 bg-white dark:bg-zinc-950 {$currentView === 'dictionary' ? 'translate-x-0' : 'translate-x-full pointer-events-none shadow-none'}">
+            <Dictionary />
+        </div>
     </div>
 </main>
 
 <style>
-    :global(.malim-highlight) {
-        color: #6366f1 !important;
-        font-weight: 800;
-    }
-
-    :global(.dark) :global(.malim-highlight) {
-        color: #818cf8 !important;
-    }
-
     .hero-title {
+        --malim-accent: #660874;
         letter-spacing: -0.025em;
         animation: heroTitleReveal 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .hero-title {
+            --malim-accent: #8857e1;
+        }
+    }
+
+    :global(.malim-highlight) {
+        color: var(--malim-accent) !important;
+        font-weight: 800;
     }
 
     @keyframes heroTitleReveal {
@@ -223,15 +234,11 @@
         vertical-align: middle;
         width: 3px;
         height: 1.1em;
-        background: #6366f1;
+        background: var(--malim-accent);
         border-radius: 999px;
         margin-left: 4px;
         margin-bottom: 2px;
         animation: heroCursor 0.6s infinite alternate;
-    }
-
-    :global(.dark) .hero-typed::after {
-        background: #818cf8;
     }
 
     @keyframes heroCursor {

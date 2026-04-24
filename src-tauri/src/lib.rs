@@ -50,7 +50,9 @@ use saves::{check_import_file, create_export_temp_file, execute_import, get_back
 
 mod brain;
 mod resolver;
+mod dict;
 use brain::get_brain_words;
+use dict::search_russian_dictionary;
 
 pub fn build_prompt(
     lang: &str,
@@ -148,27 +150,27 @@ pub fn build_prompt(
             };
 
             let note_pron = if show_grammar_notes {
-                r#", "grammar_note": "Subject, nominative case."#
+                r#", "grammar_note": "Nominative form of 3rd person singular masculine pronoun."#
             } else {
                 ""
             };
             let note_verb = if show_grammar_notes {
-                r#", "grammar_note": "Past tense, perfective aspect."#
+                r#", "grammar_note": "Past tense masculine singular ending '-л'."#
             } else {
                 ""
             };
             let note_noun1 = if show_grammar_notes {
-                r#", "grammar_note": "Direct object, accusative case."#
+                r#", "grammar_note": "Feminine singular accusative ending '-у' replacing nominative '-а'."#
             } else {
                 ""
             };
             let note_prep = if show_grammar_notes {
-                r#", "grammar_note": "Governs Prepositional case for location."#
+                r#", "grammar_note": "Preposition denoting location, governing the prepositional case."#
             } else {
                 ""
             };
             let note_noun2 = if show_grammar_notes {
-                r#", "grammar_note": "Prepositional case governed by 'на'."#
+                r#", "grammar_note": "Masculine singular prepositional ending '-е' (hard consonant stem)."#
             } else {
                 ""
             };
@@ -476,41 +478,89 @@ fn build_batch_prompt(
                 prompt.push_str("- Stress: Add acute accents (´) to stressed vowels in 'text' and 'lemma'. NO stress on monosyllabic/English words.\n");
             }
             if show_grammar_notes {
-                prompt.push_str("- Grammar Note: Briefly explain syntactic role and why its form looks like this.\n");
+                prompt.push_str("- Grammar Note: Explain WHY the word takes this specific ending. Do NOT just repeat the case/tense. Focus on morphological rules, declension/conjugation patterns, animacy rules (e.g., 'Acc=Gen for animate masculine'), and spelling rules (e.g., '7-letter rule: и instead of ы after к/г/х/ж/ч/ш/щ').\n");
             }
             prompt.push_str("\n");
 
-            prompt.push_str(
+            let note_pron1 = if show_grammar_notes { r#", "grammar_note": "Nominative form of 3rd person singular masculine pronoun."# } else { "" };
+            let note_verb1 = if show_grammar_notes { r#", "grammar_note": "Past tense masculine singular ending '-л'."# } else { "" };
+            let note_noun1_acc = if show_grammar_notes { r#", "grammar_note": "Feminine singular accusative ending '-у' replacing nominative '-а'."# } else { "" };
+            let note_prep1 = if show_grammar_notes { r#", "grammar_note": "Preposition denoting location, governing the prepositional case."# } else { "" };
+            let note_noun1_prep = if show_grammar_notes { r#", "grammar_note": "Masculine singular prepositional ending '-е' (hard consonant stem)."# } else { "" };
+            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+
+            let note_pron2 = if show_grammar_notes { r#", "grammar_note": "1st person singular pronoun in nominative."# } else { "" };
+            let note_verb2 = if show_grammar_notes { r#", "grammar_note": "1st person singular present ending '-ю' (stem ending in vowel)."# } else { "" };
+            let note_noun2_dat = if show_grammar_notes { r#", "grammar_note": "Masculine singular dative ending '-у' (hard consonant stem)."# } else { "" };
+            let note_noun2_acc = if show_grammar_notes { r#", "grammar_note": "Feminine singular accusative ending '-у' replacing nominative '-а'."# } else { "" };
+            let note_noun2_gen = if show_grammar_notes { r#", "grammar_note": "Masculine singular genitive ending '-я' (soft stem/partitive)."# } else { "" };
+            let note_prep2 = if show_grammar_notes { r#", "grammar_note": "Preposition denoting accompaniment, governing the instrumental case."# } else { "" };
+            let note_noun2_inst = if show_grammar_notes { r#", "grammar_note": "Neuter singular instrumental ending '-ом'."# } else { "" };
+
+            let he = "Он";
+            let (read, read_lemma, book, book_lemma, table, table_lemma) = if stress_mark {
+                ("прочита́л", "прочита́ть", "кни́гу", "кни́га", "столе́", "сто́л")
+            } else {
+                ("прочитал", "прочитать", "книгу", "книга", "столе", "стол")
+            };
+
+            let i_pron = "Я";
+            let with_prep = "с";
+            let (give, give_lemma, brother, brother_lemma, cup, cup_lemma, tea, tea_lemma, milk, milk_lemma) = if stress_mark {
+                ("даю́", "дава́ть", "бра́ту", "бра́т", "ча́шку", "ча́шка", "ча́я", "ча́й", "молоко́м", "молоко́")
+            } else {
+                ("даю", "давать", "брату", "брат", "чашку", "чашка", "чая", "чай", "молоком", "молоко")
+            };
+
+            let example = format!(
                 r#"Example Output:
-{
+{{
   "items": [
-    {
+    {{
       "index": 0,
       "translation": "He read the book on the table.",
       "blocks": [
-        { "text": "Он", "pos": "pronoun", "definition": "he", "lemma": "он", "gram_case": 1, "gram_gender": "m", "gram_number": "sg" },
-        { "text": "прочитал", "pos": "verb", "definition": "read", "lemma": "прочитать", "tense": "past", "aspect": "pf" },
-        { "text": "книгу", "pos": "noun", "definition": "book", "lemma": "книга", "gram_case": 4, "gram_gender": "f", "gram_number": "sg" },
-        { "text": "на", "pos": "preposition", "definition": "on", "lemma": "на" },
-        { "text": "столе", "pos": "noun", "definition": "table", "lemma": "стол", "gram_case": 6, "gram_gender": "m", "gram_number": "sg" },
-        { "text": ".", "pos": "punctuation", "definition": "." }
+        {{ "text": "{he}", "pos": "pronoun", "definition": "he", "lemma": "он", "gram_case": 1, "gram_gender": "m", "gram_number": "sg"{note_pron1} }},
+        {{ "text": "{read}", "pos": "verb", "definition": "read", "lemma": "{read_lemma}", "tense": "past", "aspect": "pf"{note_verb1} }},
+        {{ "text": "{book}", "pos": "noun", "definition": "book", "lemma": "{book_lemma}", "gram_case": 4, "gram_gender": "f", "gram_number": "sg"{note_noun1_acc} }},
+        {{ "text": "на", "pos": "preposition", "definition": "on", "lemma": "на"{note_prep1} }},
+        {{ "text": "{table}", "pos": "noun", "definition": "table", "lemma": "{table_lemma}", "gram_case": 6, "gram_gender": "m", "gram_number": "sg"{note_noun1_prep} }},
+        {{ "text": ".", "pos": "punctuation", "definition": "."{note_punct} }}
       ]
-    },
-    {
+    }},
+    {{
       "index": 1,
-      "translation": "She is reading a book.",
+      "translation": "I give my brother a cup of tea with milk.",
       "blocks": [
-        { "text": "Она", "pos": "pronoun", "definition": "she", "lemma": "она", "gram_case": 1, "gram_gender": "f", "gram_number": "sg" },
-        { "text": "читает", "pos": "verb", "definition": "read", "lemma": "читать", "tense": "pres", "aspect": "impf" },
-        { "text": "книгу", "pos": "noun", "definition": "book", "lemma": "книга", "gram_case": 4, "gram_gender": "f", "gram_number": "sg" },
-        { "text": ".", "pos": "punctuation", "definition": "." }
+        {{ "text": "{i_pron}", "pos": "pronoun", "definition": "I", "lemma": "я", "gram_case": 1, "gram_gender": "m", "gram_number": "sg"{note_pron2} }},
+        {{ "text": "{give}", "pos": "verb", "definition": "give", "lemma": "{give_lemma}", "tense": "pres", "aspect": "impf"{note_verb2} }},
+        {{ "text": "{brother}", "pos": "noun", "definition": "brother", "lemma": "{brother_lemma}", "gram_case": 3, "gram_gender": "m", "gram_number": "sg"{note_noun2_dat} }},
+        {{ "text": "{cup}", "pos": "noun", "definition": "cup", "lemma": "{cup_lemma}", "gram_case": 4, "gram_gender": "f", "gram_number": "sg"{note_noun2_acc} }},
+        {{ "text": "{tea}", "pos": "noun", "definition": "tea", "lemma": "{tea_lemma}", "gram_case": 2, "gram_gender": "m", "gram_number": "sg"{note_noun2_gen} }},
+        {{ "text": "{with_prep}", "pos": "preposition", "definition": "with", "lemma": "с"{note_prep2} }},
+        {{ "text": "{milk}", "pos": "noun", "definition": "milk", "lemma": "{milk_lemma}", "gram_case": 5, "gram_gender": "n", "gram_number": "sg"{note_noun2_inst} }},
+        {{ "text": ".", "pos": "punctuation", "definition": "."{note_punct} }}
       ]
-    }
+    }}
   ]
-}
+}}
 
 "#,
+                he = he, note_pron1 = note_pron1,
+                read = read, read_lemma = read_lemma, note_verb1 = note_verb1,
+                book = book, book_lemma = book_lemma, note_noun1_acc = note_noun1_acc,
+                note_prep1 = note_prep1,
+                table = table, table_lemma = table_lemma, note_noun1_prep = note_noun1_prep,
+                i_pron = i_pron, note_pron2 = note_pron2,
+                give = give, give_lemma = give_lemma, note_verb2 = note_verb2,
+                brother = brother, brother_lemma = brother_lemma, note_noun2_dat = note_noun2_dat,
+                cup = cup, cup_lemma = cup_lemma, note_noun2_acc = note_noun2_acc,
+                tea = tea, tea_lemma = tea_lemma, note_noun2_gen = note_noun2_gen,
+                with_prep = with_prep, note_prep2 = note_prep2,
+                milk = milk, milk_lemma = milk_lemma, note_noun2_inst = note_noun2_inst,
+                note_punct = note_punct
             );
+            prompt.push_str(&example);
         }
         _ => {
             prompt.push_str("Task: Sentence analysis (translation, tokenization, POS, definitions).\n\n");
@@ -2074,6 +2124,7 @@ pub fn run() {
             get_backup_definitions,
             execute_import,
             get_brain_words,
+            search_russian_dictionary,
             update_chat_parsed
         ])
         .run(tauri::generate_context!())

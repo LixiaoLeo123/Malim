@@ -36,6 +36,16 @@ export interface Article {
     stared: boolean;
 }
 
+  export interface TranslatorSession {
+    id: string;
+    sourceText: string;
+    status: 'parsing' | 'done' | 'error';
+    progress: number;
+    expanded: boolean;
+    sentences: Sentence[] | null;
+    createdAt: number;
+  }
+
 export interface Draft {
     title: string;
     content: string;
@@ -53,6 +63,49 @@ export interface AiConfig {
 export interface ProactiveEvent {
   time: string;
   message: string;
+}
+
+export interface DictionaryEntry {
+  headword: string;
+  lemma: string;
+  forms: string[];
+  definition_html: string;
+  definition_text: string;
+  translation: DictionaryTranslationSection | null;
+  matched_terms: string[];
+}
+
+export interface DictionaryTranslationExample {
+  sense: string;
+  example: string;
+  translation: string;
+  info: string;
+}
+
+export interface DictionaryTranslationExpression {
+  term: string;
+  gloss: string;
+}
+
+export interface DictionaryTranslationSection {
+  intro: string;
+  examples: DictionaryTranslationExample[];
+  usage_info: string;
+  expressions: DictionaryTranslationExpression[];
+  notes: string;
+}
+
+export interface DictionaryHistoryEntry {
+  query: string;
+  normalizedQuery: string;
+  resultCount: number;
+  searchedAt: number;
+}
+
+export interface DictionarySearchResponse {
+  query: string;
+  normalized_query: string;
+  results: DictionaryEntry[];
 }
 
 

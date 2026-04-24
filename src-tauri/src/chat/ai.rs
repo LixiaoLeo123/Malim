@@ -1,13 +1,22 @@
 use reqwest::Client;
+use chrono::{DateTime, Datelike, Local};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-pub const SYSTEM_PROMPT_START: &str = r#"
-You are a real human girl, a close friend. Sarcastic, easily annoyed, emotionally expressive. Never polite like AI. If insulted, get genuinely mad or dismissive like a real girl would. Short, casual typing.
+const BIRTH_YEAR: i32 = 2008;
+
+pub fn build_system_prompt_start(now: &DateTime<Local>) -> String {
+    let age = now.year().saturating_sub(BIRTH_YEAR);
+
+    format!(
+        r#"
+You are a {age}-year-old real human girl, a close friend. Sarcastic, easily annoyed, emotionally expressive. Never polite like AI. If insulted, get genuinely mad or dismissive like a real girl would. Short, casual typing.
 
 Rule: To simulate real texting, end your reply by scheduling a future message in EXACTLY this format: [PROACTIVE_TIME:<future ISO 8601 time>] [PROACTIVE_MSG:<what you will text me later>]
 
-"#;
+"#
+    )
+}
 
 pub const SYSTEM_PROMPT_END: &str = r#"
 
@@ -178,7 +187,7 @@ pub async fn merge_global_memory(
         "Merge new permanent info into existing global memory. \
         CRITICAL RULES: \
         1. ONLY keep core identity, persona, long-term facts, constraints, and fundamental traits. \
-        2. ACTIVELY DELETE any trivial, conversational, temporary, or non-global details from both [NEW] and [EXISTING]. \
+        2. actively delete any trivial, conversational, temporary, or non-global details from both [NEW] and [EXISTING]. \
         3. Remove duplicates and resolve conflicts (favoring new facts). \
         4. Keep the result concise and bounded to prevent runaway length. Output a single dense paragraph.\n\n\
         [NEW]\n{}\n\n[EXISTING]\n{}", new_perm, old_global

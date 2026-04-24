@@ -2,7 +2,7 @@
 	import { onDestroy, onMount, tick } from "svelte";
 	import { fly, fade } from "svelte/transition";
 	import { invoke } from "@tauri-apps/api/core";
-	import { currentView, settings } from "../lib/stores";
+	import { currentView, settings, translatorLabTransfer } from "../lib/stores";
 	import { notifications } from "$lib/notificationStore";
 	import { playAudio, stopAudio } from "../lib/audio";
 	import type { Block, Sentence } from "../lib/types";
@@ -76,6 +76,8 @@
 		x: 0,
 		y: 0,
 		msgId: null as number | null,
+		text: "",
+		kind: "message" as "message" | "text",
 		position: "top" as "top" | "bottom",
 	};
 
@@ -100,10 +102,15 @@
 		msgId: number,
 		target: HTMLElement,
 	) {
+		const msg = messages.find((m) => m.id === msgId);
 		const rect = target.getBoundingClientRect();
-		const containerRect = containerEl
-			? containerEl.getBoundingClientRect()
-			: { left: 0, top: 0 };
+		const containerRect = containerEl?.getBoundingClientRect();
+		const containerLeft = containerRect?.left ?? 0;
+		const containerTop = containerRect?.top ?? 0;
+		const containerWidth = containerRect?.width ?? window.innerWidth;
+		const estimatedWidth = 260;
+		const minX = estimatedWidth / 2 + 16;
+		const maxX = Math.max(minX, containerWidth - estimatedWidth / 2 - 16);
 		let pos: "top" | "bottom" = "top";
 		let targetY = rect.top - 12;
 		if (targetY < 80) {
@@ -112,11 +119,49 @@
 		}
 		contextMenu = {
 			visible: true,
-			x: clientX - containerRect.left,
-			y: targetY - containerRect.top,
+			x: Math.max(minX, Math.min(clientX - containerLeft, maxX)),
+			y: targetY - containerTop,
 			msgId,
+			text: msg?.text || "",
+			kind: "message",
 			position: pos,
 		};
+	}
+
+	function showTextContextMenu(
+		clientX: number,
+		text: string,
+		target: HTMLElement,
+	) {
+		const rect = target.getBoundingClientRect();
+		const containerRect = containerEl?.getBoundingClientRect();
+		const containerLeft = containerRect?.left ?? 0;
+		const containerTop = containerRect?.top ?? 0;
+		const containerWidth = containerRect?.width ?? window.innerWidth;
+		const estimatedWidth = 210;
+		const minX = estimatedWidth / 2 + 16;
+		const maxX = Math.max(minX, containerWidth - estimatedWidth / 2 - 16);
+		let pos: "top" | "bottom" = "top";
+		let targetY = rect.top - 12;
+		if (targetY < 80) {
+			pos = "bottom";
+			targetY = rect.bottom + 12;
+		}
+		contextMenu = {
+			visible: true,
+			x: Math.max(minX, Math.min(clientX - containerLeft, maxX)),
+			y: targetY - containerTop,
+			msgId: null,
+			text,
+			kind: "text",
+			position: pos,
+		};
+	}
+
+	function sendToTranslatorLab(text: string, mode: "fill" | "parse") {
+		translatorLabTransfer.set({ text, mode });
+		$currentView = "translator";
+		closeContextMenu();
 	}
 
 	function detectLanguage(text: string): string {
@@ -862,6 +907,38 @@
 		}, 500);
 	}
 
+	function onTextPointerDown(
+		e: PointerEvent | TouchEvent,
+		text: string,
+	) {
+		const target = e.currentTarget as HTMLElement;
+		pressTimer = window.setTimeout(() => {
+			const rect = target.getBoundingClientRect();
+			showTextContextMenu(rect.left + rect.width / 2, text, target);
+		}, 500);
+	}
+
+	function handleSentenceContextMenu(
+		e: MouseEvent,
+		text: string,
+	) {
+		e.preventDefault();
+		e.stopPropagation();
+		showTextContextMenu(e.clientX, text, e.currentTarget as HTMLElement);
+	}
+
+	function handleGrammarContextMenu(e: MouseEvent, text: string) {
+		e.preventDefault();
+		e.stopPropagation();
+		showTextContextMenu(e.clientX, text, e.currentTarget as HTMLElement);
+	}
+
+	function handleTranslationPopupContextMenu(e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		showTextContextMenu(e.clientX, translationResult, e.currentTarget as HTMLElement);
+	}
+
 	function onPointerUp() {
 		clearTimeout(pressTimer);
 	}
@@ -871,9 +948,22 @@
 	}
 
 	function copyText() {
-		const msg = messages.find((m) => m.id === contextMenu.msgId);
-		if (msg) navigator.clipboard.writeText(msg.text);
+		if (contextMenu.text) navigator.clipboard.writeText(contextMenu.text);
 		closeContextMenu();
+	}
+
+	function getGrammarCorrectedText(corrections: GrammarCorrection[] | null | undefined) {
+		if (!corrections || corrections.length === 0) return "";
+		return corrections
+			.map((correction) => {
+				if (correction.type === "deleted") return "";
+				return correction.corrected || correction.original || "";
+			})
+			.filter(Boolean)
+			.join(" ")
+			.replace(/\s+([,.;:!?])/g, "$1")
+			.replace(/\(\s+/g, "(")
+			.replace(/\s+\)/g, ")");
 	}
 
 	$: if ($currentView === "chat" && chatContainer && firstLoad) {
@@ -1003,6 +1093,14 @@
 									{#each msg.parsedSentences as sentence}
 										<div
 											class="parsed-sentence"
+												on:pointerdown={(e) => {
+													e.stopPropagation();
+													onTextPointerDown(e, sentence.original);
+												}}
+											on:pointerup={onPointerUp}
+											on:pointermove={onPointerUp}
+											on:pointercancel={onPointerUp}
+												on:contextmenu={(e) => handleSentenceContextMenu(e, sentence.original)}
 											on:click={() =>
 												handleSentenceClick(sentence)}
 										>
@@ -1128,7 +1226,20 @@
 									Checking...
 								</div>
 							{:else if msg.isMine && msg.grammarCorrections}
-								<div class="grammar-check result">
+									<div
+										class="grammar-check result"
+											on:pointerdown={(e) => {
+												e.stopPropagation();
+												onTextPointerDown(
+													e,
+												getGrammarCorrectedText(msg.grammarCorrections),
+												);
+											}}
+										on:pointerup={onPointerUp}
+										on:pointermove={onPointerUp}
+										on:pointercancel={onPointerUp}
+											on:contextmenu={(e) => handleGrammarContextMenu(e, getGrammarCorrectedText(msg.grammarCorrections))}
+									>
 									{#each msg.grammarCorrections as correction}
 										{#if correction.type === "unchanged"}
 											<span class="gc-block"
@@ -1171,6 +1282,15 @@
 		{#if translationResult}
 			<div
 				class="translation-popup"
+				role="group"
+				on:pointerdown={(e) => {
+					e.stopPropagation();
+					onTextPointerDown(e, translationResult);
+				}}
+				on:pointerup={onPointerUp}
+				on:pointermove={onPointerUp}
+				on:pointercancel={onPointerUp}
+				on:contextmenu={handleTranslationPopupContextMenu}
 				transition:fly={{ y: 10, duration: 200 }}
 			>
 				<span class="lang-tag">RU</span>{translationResult}
@@ -1216,44 +1336,26 @@
 			style="top: {contextMenu.y}px; left: {contextMenu.x}px;"
 			transition:fade={{ duration: 150 }}
 		>
-			<button class="context-item" on:click={copyText}>
-				<svg
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-					<path
-						d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-					/>
-				</svg>
-				<span>Copy</span>
-			</button>
-			<button
-				class="context-item"
-				on:click={() => startQuote(contextMenu.msgId!)}
-			>
-				<svg
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					<polyline points="9 17 4 12 9 7"></polyline>
-					<path d="M20 18v-2a4 4 0 0 0-4-4H4"></path>
-				</svg>
-				<span>Quote</span>
-			</button>
-			{#if !messages.find((m) => m.id === contextMenu.msgId)?.isMine}
-				<div class="divider"></div>
+			{#if contextMenu.kind === "message"}
+				<button class="context-item" on:click={copyText}>
+					<svg
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+						<path
+							d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+						/>
+					</svg>
+					<span>Copy</span>
+				</button>
 				<button
 					class="context-item"
-					on:click={() => parseMessage(contextMenu.msgId!)}
+					on:click={() => startQuote(contextMenu.msgId!)}
 				>
 					<svg
 						viewBox="0 0 24 24"
@@ -1263,40 +1365,106 @@
 						stroke-linecap="round"
 						stroke-linejoin="round"
 					>
+						<polyline points="9 17 4 12 9 7"></polyline>
+						<path d="M20 18v-2a4 4 0 0 0-4-4H4"></path>
+					</svg>
+					<span>Quote</span>
+				</button>
+				{#if !messages.find((m) => m.id === contextMenu.msgId)?.isMine}
+					<div class="divider"></div>
+					<button
+						class="context-item"
+						on:click={() => parseMessage(contextMenu.msgId!)}
+					>
+						<svg
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path
+								d="M4 7V4a2 2 0 0 1 2-2h8.5L20 7.5V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"
+							/>
+							<polyline points="14 2 14 8 20 8" />
+							<path d="M9 15l2 2 4-4" />
+						</svg>
+						<span
+							>{messages.find((m) => m.id === contextMenu.msgId)
+								?.parseStatus === "done"
+								? "Re-parse"
+								: "Parse"}</span
+						>
+					</button>
+				{/if}
+				{#if messages.find((m) => m.id === contextMenu.msgId)?.isMine}
+					<div class="divider"></div>
+					<button
+						class="context-item"
+						on:click={() => regenerateGrammar(contextMenu.msgId!)}
+					>
+						<svg
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path
+								d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"
+							/>
+							<polygon points="18 2 22 6 12 16 8 16 8 12 18 2" />
+						</svg>
+						<span>Grammar</span>
+					</button>
+				{/if}
+			{:else}
+				<button class="context-item" on:click={copyText}>
+					<svg
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
 						<path
-							d="M4 7V4a2 2 0 0 1 2-2h8.5L20 7.5V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"
+							d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
 						/>
+					</svg>
+					<span>Copy</span>
+				</button>
+				<button class="context-item" on:click={() => sendToTranslatorLab(contextMenu.text, "fill")}>
+					<svg
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<path d="M4 12h12" />
+						<path d="M12 4l8 8-8 8" />
+					</svg>
+					<span>Fill</span>
+				</button>
+				<button class="context-item" on:click={() => sendToTranslatorLab(contextMenu.text, "parse")}>
+					<svg
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					>
+						<path d="M4 7V4a2 2 0 0 1 2-2h8.5L20 7.5V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3" />
 						<polyline points="14 2 14 8 20 8" />
 						<path d="M9 15l2 2 4-4" />
 					</svg>
-					<span
-						>{messages.find((m) => m.id === contextMenu.msgId)
-							?.parseStatus === "done"
-							? "Re-parse"
-							: "Parse"}</span
-					>
-				</button>
-			{/if}
-			{#if messages.find((m) => m.id === contextMenu.msgId)?.isMine}
-				<div class="divider"></div>
-				<button
-					class="context-item"
-					on:click={() => regenerateGrammar(contextMenu.msgId!)}
-				>
-					<svg
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<path
-							d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"
-						/>
-						<polygon points="18 2 22 6 12 16 8 16 8 12 18 2" />
-					</svg>
-					<span>Grammar</span>
+					<span>Parse</span>
 				</button>
 			{/if}
 		</div>

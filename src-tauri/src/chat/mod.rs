@@ -5,9 +5,9 @@ pub mod token;
 pub mod vector;
 
 use ai::{
-    call_embedding_api, call_shadow_ai, chat_completion, compress_context, merge_global_memory,
-    GrammarCorrection, MainAiResponse, MainAiResponseWithId, SYSTEM_PROMPT_END,
-    SYSTEM_PROMPT_START,
+    build_system_prompt_start, call_embedding_api, call_shadow_ai, chat_completion,
+    compress_context, merge_global_memory, GrammarCorrection, MainAiResponse,
+    MainAiResponseWithId, SYSTEM_PROMPT_END,
 };
 use chrono::Local;
 use db::DbState;
@@ -221,10 +221,11 @@ impl MemoryHandler {
 
         let (summary, history) = Self::parse_context(&context_mem);
 
+        let now = Local::now();
         let system_prompt_with_time = format!(
             "{} Current time: {} {}",
-            SYSTEM_PROMPT_START,
-            Local::now().format("%Y-%m-%dT%H:%M:%S%:z"),
+            build_system_prompt_start(&now),
+            now.format("%Y-%m-%dT%H:%M:%S%:z"),
             SYSTEM_PROMPT_END
         );
 

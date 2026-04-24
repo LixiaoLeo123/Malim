@@ -1,8 +1,8 @@
 import { writable } from 'svelte/store';
-import type { Article, Draft, Settings } from './types';
+import type { Article, DictionaryHistoryEntry, Draft, Settings, TranslatorSession } from './types';
 import { invoke } from '@tauri-apps/api/core'
 import { get } from 'svelte/store'
-export const currentView = writable<'home' | 'editor' | 'reader' | 'discover' | 'chat'>('home');
+export const currentView = writable<'home' | 'editor' | 'reader' | 'discover' | 'chat' | 'translator' | 'dictionary'>('home');
 
 export const isSidebarOpen = writable<boolean>(false);
 
@@ -21,6 +21,17 @@ export const articles = writable<Article[]>([]);
 // ]);
 
 export const activeArticleId = writable<string | null>(null);
+
+export const translatorSessions = writable<TranslatorSession[]>([]);
+
+export type TranslatorLabTransfer = {
+    text: string;
+    mode: 'fill' | 'parse';
+};
+
+export const translatorLabTransfer = writable<TranslatorLabTransfer | null>(null);
+
+export const dictionaryHistory = writable<DictionaryHistoryEntry[]>([]);
 
 export const editorDraft = writable<Draft>({
     title: '',
@@ -99,9 +110,43 @@ async function load() {
         });
         articles.set(cleanArticles);
     }
+
+    if (data.translatorSessions) {
+        const cleanTranslatorSessions = (data.translatorSessions as TranslatorSession[]).map((item) =>
+            item.status === 'parsing'
+                ? {
+                    ...item,
+                    status: 'error' as const,
+                    progress: 0,
+                }
+                : item,
+        );
+        translatorSessions.set(cleanTranslatorSessions.slice(0, 256));
+    }
     
     if (data.draft) editorDraft.set(data.draft);
     if (data.settings) settings.set({ ...defaultSettings, ...data.settings });
+
+    if (Array.isArray(data.dictionaryHistory)) {
+        const rawDictionaryHistory: Array<Partial<DictionaryHistoryEntry>> = data.dictionaryHistory;
+        const cleanDictionaryHistory: DictionaryHistoryEntry[] = rawDictionaryHistory
+            .filter((item): item is Partial<DictionaryHistoryEntry> => typeof item?.query === 'string')
+            .map((item: Partial<DictionaryHistoryEntry>) => {
+                const query = item.query!.trim();
+                const resultCount = Number(item.resultCount);
+                const searchedAt = Number(item.searchedAt);
+
+                return {
+                    query,
+                    normalizedQuery: typeof item.normalizedQuery === 'string' ? item.normalizedQuery : query.toLowerCase(),
+                    resultCount: Number.isFinite(resultCount) ? resultCount : 0,
+                    searchedAt: Number.isFinite(searchedAt) ? searchedAt : Date.now(),
+                };
+            })
+            .filter((item: DictionaryHistoryEntry) => item.query.length > 0)
+            .slice(0, 128);
+        dictionaryHistory.set(cleanDictionaryHistory);
+    }
 }
 
 async function loadWithIpcRetry() {
@@ -132,6 +177,8 @@ async function save() {
     saveTimeout = setTimeout(async () => {
         const snapshot = {
             articles: get(articles),
+            translatorSessions: get(translatorSessions).slice(0, 256),
+            dictionaryHistory: get(dictionaryHistory).slice(0, 128),
             draft: get(editorDraft),
             settings: get(settings)
         };
@@ -146,6 +193,8 @@ async function save() {
     await sleep(IPC_INITIAL_DELAY_MS);
     await loadWithIpcRetry();
     articles.subscribe(save);
+    translatorSessions.subscribe(save);
+    dictionaryHistory.subscribe(save);
     editorDraft.subscribe(save);
     settings.subscribe(save);
 })();
