@@ -1,7 +1,7 @@
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
     import { ArrowLeft, BookOpenText, Search, LoaderCircle, CircleAlert } from "lucide-svelte";
-    import { currentView, dictionaryHistory } from "../lib/stores";
+    import { currentView, dictionaryHistory, dictionarySearchQuery } from "../lib/stores";
     import { notifications } from "$lib/notificationStore";
     import type { DictionaryHistoryEntry, DictionarySearchResponse } from "$lib/types";
 
@@ -14,6 +14,12 @@
     let searchInputEl: HTMLInputElement | null = null;
 
     const HISTORY_LIMIT = 128;
+
+    $: if ($dictionarySearchQuery) {
+        query = $dictionarySearchQuery;
+        dictionarySearchQuery.set(null);
+        setTimeout(searchDictionary, 0);
+    }
 
     function recordHistoryEntry(entry: DictionaryHistoryEntry) {
         dictionaryHistory.update((items) => {

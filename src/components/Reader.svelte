@@ -4,6 +4,8 @@
         activeArticleId,
         isSidebarOpen,
         settings,
+        currentView,
+        dictionarySearchQuery,
     } from "../lib/stores";
     import {
         Menu,
@@ -345,7 +347,25 @@
         activeBlockEl = null;
     }
 
-    import { currentView } from "$lib/stores";
+    let pressTimer: number;
+
+    function searchInDictionary(text: string) {
+        clearTimeout(pressTimer);
+        dictionarySearchQuery.set(text.trim());
+        $currentView = "dictionary";
+    }
+
+    function onPointerDown(e: PointerEvent | TouchEvent, text: string) {
+        pressTimer = window.setTimeout(() => {
+            searchInDictionary(text);
+        }, 500);
+    }
+    
+    function onPointerUp() {
+        if (pressTimer) {
+            clearTimeout(pressTimer);
+        }
+    }
 
     function handleGlobalClick(e: MouseEvent) {
         if ($currentView !== "reader") return;
@@ -455,6 +475,10 @@
                                             sentence,
                                             sectionIdx,
                                         )}
+                                    on:contextmenu|preventDefault={(e) => searchInDictionary(block.lemma || block.text)}
+                                    on:pointerdown={(e) => onPointerDown(e, block.lemma || block.text)}
+                                    on:pointerup={onPointerUp}
+                                    on:pointercancel={onPointerUp}
                                 >
                                     {block.text}
                                     {#if article?.language === "RU" && (block.pos === "noun" || block.pos === "pronoun") && block.gram_case}

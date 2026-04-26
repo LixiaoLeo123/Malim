@@ -32,6 +32,7 @@ export type TranslatorLabTransfer = {
 export const translatorLabTransfer = writable<TranslatorLabTransfer | null>(null);
 
 export const dictionaryHistory = writable<DictionaryHistoryEntry[]>([]);
+export const dictionarySearchQuery = writable<string | null>(null);
 
 export const editorDraft = writable<Draft>({
     title: '',

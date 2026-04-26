@@ -2,7 +2,12 @@
 	import { onDestroy, onMount, tick } from "svelte";
 	import { fly, fade } from "svelte/transition";
 	import { invoke } from "@tauri-apps/api/core";
-	import { currentView, settings, translatorLabTransfer } from "../lib/stores";
+	import {
+		currentView,
+		settings,
+		translatorLabTransfer,
+		dictionarySearchQuery,
+	} from "../lib/stores";
 	import { notifications } from "$lib/notificationStore";
 	import { playAudio, stopAudio } from "../lib/audio";
 	import type { Block, Sentence } from "../lib/types";
@@ -158,6 +163,13 @@
 		};
 	}
 
+	function searchInDictionary(text: string) {
+		clearTimeout(pressTimer);
+		dictionarySearchQuery.set(text.trim());
+		$currentView = "dictionary";
+		closeContextMenu();
+	}
+
 	function sendToTranslatorLab(text: string, mode: "fill" | "parse") {
 		translatorLabTransfer.set({ text, mode });
 		$currentView = "translator";
@@ -271,7 +283,7 @@
 
 			msg.parsedSentences = result;
 			msg.parseStatus = "done";
-			
+
 			unconsumedParsedMessages.add(msg.id);
 
 			if (msg.dbLogId) {
@@ -280,7 +292,10 @@
 					parsedContent: JSON.stringify(result),
 				}).catch((e) => {
 					console.error("Failed to save parsed:", e);
-					notifications.error("Failed to save parsed content:" + (e instanceof Error ? e.message : String(e)));
+					notifications.error(
+						"Failed to save parsed content:" +
+							(e instanceof Error ? e.message : String(e)),
+					);
 				});
 			}
 			messages = [...messages];
@@ -288,7 +303,10 @@
 			console.error("Parse failed:", e);
 			msg.parseStatus = "error";
 			messages = [...messages];
-			notifications.error("Failed to parse message:" + (e instanceof Error ? e.message : String(e)));
+			notifications.error(
+				"Failed to parse message:" +
+					(e instanceof Error ? e.message : String(e)),
+			);
 		}
 	}
 
@@ -299,7 +317,12 @@
 		msgId: number,
 	) {
 		event.stopPropagation();
-		if (block.pos === "unknown" || block.pos === "punctuation" || block.pos === "error") return;
+		if (
+			block.pos === "unknown" ||
+			block.pos === "punctuation" ||
+			block.pos === "error"
+		)
+			return;
 
 		// Record the click to backend, like Reader
 		if (block.lemma) {
@@ -307,7 +330,10 @@
 			if (!msgLemmas.has(block.lemma)) {
 				msgLemmas.add(block.lemma);
 				sessionLemmasByMsgId.set(msgId, msgLemmas);
-				if ($settings.memoryModelEnabled && block.lemma !== lastClickedBlock?.lemma) {
+				if (
+					$settings.memoryModelEnabled &&
+					block.lemma !== lastClickedBlock?.lemma
+				) {
 					invoke("record_word_click", {
 						lemma: block.lemma,
 						clicked: true,
@@ -492,7 +518,10 @@
 			embedApiKey: embedConfig?.apiKey ?? "",
 			embedApiUrl: embedConfig?.apiUrl ?? "",
 			embedModelName: embedConfig?.modelName ?? "",
-			maxTotalTokens: Math.max(500, Number($settings.maxTotalTokens || 4000)),
+			maxTotalTokens: Math.max(
+				500,
+				Number($settings.maxTotalTokens || 4000),
+			),
 			maxRagTokens: Math.max(100, Number($settings.maxRagTokens || 1000)),
 			maxRagAppendTokens: Math.max(
 				100,
@@ -531,10 +560,12 @@
 					: 0;
 				const formattedLogs = res.messages.map((msg) => {
 					const parsedQuote = parseQuote(msg.content);
-					const grammarCorrections =
-						safeJsonParse<GrammarCorrection[]>(msg.grammar_corrections);
-					const parsedSentences =
-						safeJsonParse<Sentence[]>(msg.parsed_content);
+					const grammarCorrections = safeJsonParse<
+						GrammarCorrection[]
+					>(msg.grammar_corrections);
+					const parsedSentences = safeJsonParse<Sentence[]>(
+						msg.parsed_content,
+					);
 
 					return {
 						id: msg.id,
@@ -570,7 +601,10 @@
 			}
 		} catch (e) {
 			console.error("Failed to load history:", e);
-			notifications.error("Failed to load chat history:" + (e instanceof Error ? e.message : String(e)));
+			notifications.error(
+				"Failed to load chat history:" +
+					(e instanceof Error ? e.message : String(e)),
+			);
 		} finally {
 			isLoadingHistory = false;
 		}
@@ -615,15 +649,23 @@
 		// Consume all unclicked parsed words in current session
 		unconsumedParsedMessages.forEach((pMsgId) => {
 			const pMsg = messages.find((m) => m.id === pMsgId);
-            if (!pMsg || fullyConsumedMessageIds.has(pMsg.id)) return;
+			if (!pMsg || fullyConsumedMessageIds.has(pMsg.id)) return;
 
 			if (pMsg.parsedSentences) {
 				const msgLemmas = sessionLemmasByMsgId.get(pMsgId) || new Set();
-				
+
 				pMsg.parsedSentences.forEach((s) => {
 					s.blocks.forEach((b) => {
-						if (b.pos !== "unknown" && b.pos !== "punctuation" && b.pos !== "error" && b.lemma) {
-							if (!msgLemmas.has(b.lemma) && $settings.memoryModelEnabled) {
+						if (
+							b.pos !== "unknown" &&
+							b.pos !== "punctuation" &&
+							b.pos !== "error" &&
+							b.lemma
+						) {
+							if (
+								!msgLemmas.has(b.lemma) &&
+								$settings.memoryModelEnabled
+							) {
 								msgLemmas.add(b.lemma);
 								invoke("record_word_click", {
 									lemma: b.lemma,
@@ -638,17 +680,21 @@
 					});
 				});
 				sessionLemmasByMsgId.set(pMsgId, msgLemmas);
-                fullyConsumedMessageIds.add(pMsgId);
-			} else if (!pMsg.parsedSentences && pMsg.detectedLang === "RU" && $settings.memoryModelEnabled) {
+				fullyConsumedMessageIds.add(pMsgId);
+			} else if (
+				!pMsg.parsedSentences &&
+				pMsg.detectedLang === "RU" &&
+				$settings.memoryModelEnabled
+			) {
 				// Record unparsed Russian messages directly
 				invoke("record_unparsed_text_words", {
-					text: pMsg.text
+					text: pMsg.text,
 				}).catch((e) =>
 					notifications.error(
 						`Failed to save vocabulary progress: ${e instanceof Error ? e.message : String(e)}`,
 					),
 				);
-                fullyConsumedMessageIds.add(pMsgId);
+				fullyConsumedMessageIds.add(pMsgId);
 			}
 		});
 		unconsumedParsedMessages.clear();
@@ -675,10 +721,11 @@
 			}
 		}
 		if (sectionWordCount > 0) {
-			invoke("update_daily_reading", { count: sectionWordCount }).catch((e) =>
-				notifications.error(
-					`Failed to update reading progress: ${e instanceof Error ? e.message : String(e)}`,
-				),
+			invoke("update_daily_reading", { count: sectionWordCount }).catch(
+				(e) =>
+					notifications.error(
+						`Failed to update reading progress: ${e instanceof Error ? e.message : String(e)}`,
+					),
 			);
 		}
 
@@ -729,7 +776,7 @@
 				if (mIdx === -1) return;
 				messages[mIdx].dbLogId = aiRes.user_log_id;
 				messages[mIdx].status = "success";
-				
+
 				const newAiMsgId = Date.now();
 				messages = [
 					...messages,
@@ -740,11 +787,11 @@
 						timestamp: newAiMsgId,
 						status: "success",
 						dbLogId: aiRes.ai_log_id,
-						detectedLang: detectLanguage(aiRes.reply)
+						detectedLang: detectLanguage(aiRes.reply),
 					},
 				];
 				unconsumedParsedMessages.add(newAiMsgId);
-				
+
 				scrollToBottom();
 				if (aiRes.proactive_time && aiRes.proactive_message) {
 					settings.update((s) => {
@@ -771,7 +818,10 @@
 				let mIdx = messages.findIndex((m) => m.id === msgId);
 				if (mIdx !== -1) messages[mIdx].status = "error";
 				messages = [...messages];
-				notifications.error("Failed to send message:" + (err instanceof Error ? err.message : String(err)));
+				notifications.error(
+					"Failed to send message:" +
+						(err instanceof Error ? err.message : String(err)),
+				);
 			});
 
 		apiCheckGrammar(text)
@@ -899,19 +949,29 @@
 		clearProactiveTimer();
 	});
 
+	function onPointerDownDictionary(
+		e: PointerEvent | TouchEvent,
+		text: string,
+	) {
+		if ("button" in e && (e as PointerEvent).button !== 0) return;
+		clearTimeout(pressTimer);
+		pressTimer = window.setTimeout(() => {
+			searchInDictionary(text);
+		}, 500);
+	}
+
 	function onPointerDown(e: PointerEvent | TouchEvent, msgId: number) {
 		const target = e.currentTarget as HTMLElement;
+		clearTimeout(pressTimer);
 		pressTimer = window.setTimeout(() => {
 			const rect = target.getBoundingClientRect();
 			showContextMenu(rect.left + rect.width / 2, msgId, target);
 		}, 500);
 	}
 
-	function onTextPointerDown(
-		e: PointerEvent | TouchEvent,
-		text: string,
-	) {
+	function onTextPointerDown(e: PointerEvent | TouchEvent, text: string) {
 		const target = e.currentTarget as HTMLElement;
+		clearTimeout(pressTimer);
 		pressTimer = window.setTimeout(() => {
 			const rect = target.getBoundingClientRect();
 			showTextContextMenu(rect.left + rect.width / 2, text, target);
@@ -920,11 +980,12 @@
 
 	function handleSentenceContextMenu(
 		e: MouseEvent,
-		text: string,
+		sentenceText: string,
+		msgId: number,
 	) {
 		e.preventDefault();
 		e.stopPropagation();
-		showTextContextMenu(e.clientX, text, e.currentTarget as HTMLElement);
+		showContextMenu(e.clientX, msgId, e.currentTarget as HTMLElement);
 	}
 
 	function handleGrammarContextMenu(e: MouseEvent, text: string) {
@@ -936,7 +997,11 @@
 	function handleTranslationPopupContextMenu(e: MouseEvent) {
 		e.preventDefault();
 		e.stopPropagation();
-		showTextContextMenu(e.clientX, translationResult, e.currentTarget as HTMLElement);
+		showTextContextMenu(
+			e.clientX,
+			translationResult,
+			e.currentTarget as HTMLElement,
+		);
 	}
 
 	function onPointerUp() {
@@ -952,7 +1017,9 @@
 		closeContextMenu();
 	}
 
-	function getGrammarCorrectedText(corrections: GrammarCorrection[] | null | undefined) {
+	function getGrammarCorrectedText(
+		corrections: GrammarCorrection[] | null | undefined,
+	) {
 		if (!corrections || corrections.length === 0) return "";
 		return corrections
 			.map((correction) => {
@@ -1007,7 +1074,9 @@
 			!(e.target as Element).closest(".parse-popover") &&
 			!(e.target as Element).closest(".word-block")
 		) {
-			const isSentence = !!(e.target as Element).closest(".parsed-sentence");
+			const isSentence = !!(e.target as Element).closest(
+				".parsed-sentence",
+			);
 			closeParsePopover(!isSentence);
 		}
 	}}
@@ -1093,14 +1162,19 @@
 									{#each msg.parsedSentences as sentence}
 										<div
 											class="parsed-sentence"
-												on:pointerdown={(e) => {
-													e.stopPropagation();
-													onTextPointerDown(e, sentence.original);
-												}}
+											on:pointerdown={(e) => {
+												e.stopPropagation();
+												onPointerDown(e, msg.id);
+											}}
 											on:pointerup={onPointerUp}
 											on:pointermove={onPointerUp}
 											on:pointercancel={onPointerUp}
-												on:contextmenu={(e) => handleSentenceContextMenu(e, sentence.original)}
+											on:contextmenu={(e) =>
+												handleSentenceContextMenu(
+													e,
+													sentence.original,
+													msg.id,
+												)}
 											on:click={() =>
 												handleSentenceClick(sentence)}
 										>
@@ -1129,6 +1203,25 @@
 																	sentence,
 																	msg.id,
 																)}
+															on:contextmenu|preventDefault={(
+																e,
+															) =>
+																searchInDictionary(
+																	block.lemma ||
+																		block.text,
+																)}
+															on:pointerdown={(
+																e,
+															) => {
+																e.stopPropagation();
+																onPointerDownDictionary(
+																	e,
+																	block.lemma ||
+																		block.text,
+																);
+															}}
+															on:pointerup={onPointerUp}
+															on:pointercancel={onPointerUp}
 														>
 															{block.text}
 															{#if msg.detectedLang === "RU" && (block.pos === "noun" || block.pos === "pronoun") && block.gram_case}
@@ -1217,7 +1310,9 @@
 							{/if}
 							{#if msg.quoteText}
 								<div class="quote-bubble">
-									<div class="quote-text">{msg.quoteText}</div>
+									<div class="quote-text">
+										{msg.quoteText}
+									</div>
 								</div>
 							{/if}
 
@@ -1226,20 +1321,28 @@
 									Checking...
 								</div>
 							{:else if msg.isMine && msg.grammarCorrections}
-									<div
-										class="grammar-check result"
-											on:pointerdown={(e) => {
-												e.stopPropagation();
-												onTextPointerDown(
-													e,
-												getGrammarCorrectedText(msg.grammarCorrections),
-												);
-											}}
-										on:pointerup={onPointerUp}
-										on:pointermove={onPointerUp}
-										on:pointercancel={onPointerUp}
-											on:contextmenu={(e) => handleGrammarContextMenu(e, getGrammarCorrectedText(msg.grammarCorrections))}
-									>
+								<div
+									class="grammar-check result"
+									on:pointerdown={(e) => {
+										e.stopPropagation();
+										onTextPointerDown(
+											e,
+											getGrammarCorrectedText(
+												msg.grammarCorrections,
+											),
+										);
+									}}
+									on:pointerup={onPointerUp}
+									on:pointermove={onPointerUp}
+									on:pointercancel={onPointerUp}
+									on:contextmenu={(e) =>
+										handleGrammarContextMenu(
+											e,
+											getGrammarCorrectedText(
+												msg.grammarCorrections,
+											),
+										)}
+								>
 									{#each msg.grammarCorrections as correction}
 										{#if correction.type === "unchanged"}
 											<span class="gc-block"
@@ -1346,7 +1449,14 @@
 						stroke-linecap="round"
 						stroke-linejoin="round"
 					>
-						<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+						<rect
+							x="9"
+							y="9"
+							width="13"
+							height="13"
+							rx="2"
+							ry="2"
+						/>
 						<path
 							d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
 						/>
@@ -1430,14 +1540,25 @@
 						stroke-linecap="round"
 						stroke-linejoin="round"
 					>
-						<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+						<rect
+							x="9"
+							y="9"
+							width="13"
+							height="13"
+							rx="2"
+							ry="2"
+						/>
 						<path
 							d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
 						/>
 					</svg>
 					<span>Copy</span>
 				</button>
-				<button class="context-item" on:click={() => sendToTranslatorLab(contextMenu.text, "fill")}>
+				<button
+					class="context-item"
+					on:click={() =>
+						sendToTranslatorLab(contextMenu.text, "fill")}
+				>
 					<svg
 						viewBox="0 0 24 24"
 						fill="none"
@@ -1451,7 +1572,11 @@
 					</svg>
 					<span>Fill</span>
 				</button>
-				<button class="context-item" on:click={() => sendToTranslatorLab(contextMenu.text, "parse")}>
+				<button
+					class="context-item"
+					on:click={() =>
+						sendToTranslatorLab(contextMenu.text, "parse")}
+				>
 					<svg
 						viewBox="0 0 24 24"
 						fill="none"
@@ -1460,7 +1585,9 @@
 						stroke-linecap="round"
 						stroke-linejoin="round"
 					>
-						<path d="M4 7V4a2 2 0 0 1 2-2h8.5L20 7.5V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3" />
+						<path
+							d="M4 7V4a2 2 0 0 1 2-2h8.5L20 7.5V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"
+						/>
 						<polyline points="14 2 14 8 20 8" />
 						<path d="M9 15l2 2 4-4" />
 					</svg>
@@ -1470,7 +1597,7 @@
 		</div>
 	{/if}
 
-{#if activeParsedBlock}
+	{#if activeParsedBlock}
 		<WordPopover
 			block={activeParsedBlock}
 			position={{
@@ -1479,7 +1606,9 @@
 				align: popoverPos.align,
 				arrowLeft: popoverPos.arrowLeft,
 			}}
-			language={activeParsedBlockEl?.closest("[data-lang]")?.getAttribute("data-lang") || "RU"}
+			language={activeParsedBlockEl
+				?.closest("[data-lang]")
+				?.getAttribute("data-lang") || "RU"}
 		/>
 	{/if}
 
@@ -1512,18 +1641,19 @@
 			</div>
 			<div class="setting-item">
 				<label>AI Nickname</label>
-				<input
-					type="text"
-					bind:value={$settings.aiNickname}
-				/>
+				<input type="text" bind:value={$settings.aiNickname} />
 			</div>
 			<div class="setting-item token-setting">
 				<label>Chat Token Limits</label>
-				<div class="setting-tip">Recommended: 4000 / 1000 / 1000 / 500</div>
+				<div class="setting-tip">
+					Recommended: 4000 / 1000 / 1000 / 500
+				</div>
 				<div class="token-grid">
 					<div class="token-row">
 						<div class="token-row-head">Max Total Tokens</div>
-						<div class="token-row-desc">Total token budget for one chat turn context.</div>
+						<div class="token-row-desc">
+							Total token budget for one chat turn context.
+						</div>
 						<input
 							type="number"
 							class="token-input"
@@ -1535,7 +1665,9 @@
 					</div>
 					<div class="token-row">
 						<div class="token-row-head">Max RAG Tokens</div>
-						<div class="token-row-desc">Max tokens injected from retrieved RAG memory.</div>
+						<div class="token-row-desc">
+							Max tokens injected from retrieved RAG memory.
+						</div>
 						<input
 							type="number"
 							class="token-input"
@@ -1547,7 +1679,10 @@
 					</div>
 					<div class="token-row">
 						<div class="token-row-head">Max RAG Append Tokens</div>
-						<div class="token-row-desc">Max historical RAG tokens used when appending new memory.</div>
+						<div class="token-row-desc">
+							Max historical RAG tokens used when appending new
+							memory.
+						</div>
 						<input
 							type="number"
 							class="token-input"
@@ -1559,7 +1694,9 @@
 					</div>
 					<div class="token-row">
 						<div class="token-row-head">Max User Tokens</div>
-						<div class="token-row-desc">Max tokens allowed for a single user message.</div>
+						<div class="token-row-desc">
+							Max tokens allowed for a single user message.
+						</div>
 						<input
 							type="number"
 							class="token-input"
