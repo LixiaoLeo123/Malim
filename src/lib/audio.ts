@@ -12,10 +12,12 @@ function getOsType() {
     try {
       osType = type();
     } catch {
-      osType = "unknown";
+      osType = typeof navigator !== "undefined" && navigator.userAgent.includes("Linux")
+        ? "linux"
+        : "unknown";
     }
   }
-
+  console.log("Detected OS:", osType);
   return osType;
 }
 

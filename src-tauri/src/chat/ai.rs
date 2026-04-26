@@ -84,7 +84,8 @@ pub async fn chat_completion(
         "model": model_name,
         "messages": messages,
         "stream": false,
-        "temperature": 0.6
+        "temperature": 0.6,
+        "thinking": {"type": "disabled"}
     });
 
     let client = Client::new();
@@ -128,7 +129,8 @@ pub async fn call_shadow_ai(
         "model": model_name,
         "messages": [{ "role": "user", "content": prompt }],
         "stream": false,
-        "temperature": 0.3
+        "temperature": 0.3,
+        "thinking": {"type": "disabled"}
     });
 
     if json_formatted {

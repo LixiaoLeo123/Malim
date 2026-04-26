@@ -1188,6 +1188,7 @@ async fn call_ai_api_content(
         "stream": false,
         "max_tokens": 8196,
         "enable_thinking": false,
+        "thinking": {"type": "disabled"},
         "response_format": {
             "type": "json_object"
         }
@@ -2093,6 +2094,7 @@ pub fn run() {
         .plugin(tauri_plugin_media_toolkit::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             parse_text,
