@@ -1,7 +1,7 @@
 <script lang="ts">
     import { invoke } from "@tauri-apps/api/core";
-    import { ArrowLeft, BookOpenText, Search, LoaderCircle, CircleAlert } from "lucide-svelte";
-    import { currentView, dictionaryHistory, dictionarySearchQuery } from "../lib/stores";
+	import { ArrowLeft, BookOpenText, Search, LoaderCircle, CircleAlert, ArrowRight } from "lucide-svelte";
+    import { popView, dictionaryHistory, dictionarySearchQuery } from "../lib/stores";
     import { notifications } from "$lib/notificationStore";
     import type { DictionaryHistoryEntry, DictionarySearchResponse } from "$lib/types";
 
@@ -77,7 +77,7 @@
     }
 
     function openHome() {
-        currentView.set("home");
+        popView();
     }
 
     function runHistorySearch(entry: DictionaryHistoryEntry) {
@@ -143,13 +143,13 @@
                         />
                         <button
                             type="submit"
-                            disabled={isSearching}
+                            disabled={isSearching || !query.trim()}
                             class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-xl text-zinc-400 hover:text-[#660874] hover:bg-[#660874]/5 dark:hover:text-[#9a2eb0] dark:hover:bg-[#9a2eb0]/10 transition-colors disabled:opacity-50"
                         >
                             {#if isSearching}
                                 <LoaderCircle size={18} class="animate-spin" />
                             {:else}
-                                <Search size={18} />
+                                <ArrowRight size={18} />
                             {/if}
                         </button>
                     </form>

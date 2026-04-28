@@ -219,7 +219,18 @@ impl MemoryHandler {
         let rag_text =
             Self::retrieve_rag_relevant(query_emb, all_chunks, token_limits.max_rag_tokens)?;
 
-        let (summary, history) = Self::parse_context(&context_mem);
+        let (summary, mut history) = Self::parse_context(&context_mem);
+
+        if let Ok(recent_logs) = {
+            let db_lock = self.db.lock().await;
+            db_lock.get_latest_logs(1)
+        } {
+            if let Some(last_log) = recent_logs.into_iter().next() {
+                if let Some(last_msg) = history.last_mut() {
+                    last_msg.1.push_str(&format!("\n[Time: {}]", last_log.3));
+                }
+            }
+        }
 
         let now = Local::now();
         let system_prompt_with_time = format!(
@@ -337,7 +348,18 @@ impl MemoryHandler {
             }
         }
 
-        let (final_summary, final_history) = Self::parse_context(&final_context);
+        let (final_summary, mut final_history) = Self::parse_context(&final_context);
+        
+        if let Ok(recent_logs) = {
+            let db_lock = self.db.lock().await;
+            db_lock.get_latest_logs(1)
+        } {
+            if let Some(last_log) = recent_logs.into_iter().next() {
+                if let Some(last_msg) = final_history.last_mut() {
+                    last_msg.1.push_str(&format!("\n[Time: {}]", last_log.3));
+                }
+            }
+        }
 
         let main_ai_future = chat_completion(
             main_api.0,

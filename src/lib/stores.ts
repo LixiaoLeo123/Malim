@@ -1,8 +1,48 @@
-import { writable } from 'svelte/store';
+import { derived, writable } from 'svelte/store';
 import type { Article, DictionaryHistoryEntry, Draft, Settings, TranslatorSession } from './types';
 import { invoke } from '@tauri-apps/api/core'
 import { get } from 'svelte/store'
-export const currentView = writable<'home' | 'editor' | 'reader' | 'discover' | 'chat' | 'translator' | 'dictionary'>('home');
+
+export type AppView =
+    | 'home'
+    | 'editor'
+    | 'reader'
+    | 'discover'
+    | 'chat'
+    | 'translator'
+    | 'dictionary';
+
+const HOME_VIEW: AppView = 'home';
+const MAX_VIEW_STACK_SIZE = 64;
+
+export const viewStack = writable<AppView[]>([HOME_VIEW]);
+export const currentView = derived(viewStack, ($stack) =>
+    $stack[$stack.length - 1] ?? HOME_VIEW,
+);
+
+export function pushView(view: AppView) {
+    viewStack.update((stack) => {
+        const safeStack = stack.length > 0 ? stack : [HOME_VIEW];
+        if (safeStack[safeStack.length - 1] === view) return safeStack;
+
+        const next = [...safeStack, view];
+        if (next.length <= MAX_VIEW_STACK_SIZE) return next;
+
+        // Keep home pinned at the bottom when trimming long stacks.
+        return [HOME_VIEW, ...next.slice(next.length - (MAX_VIEW_STACK_SIZE - 1))];
+    });
+}
+
+export function popView() {
+    viewStack.update((stack) => {
+        if (stack.length <= 1) return [HOME_VIEW];
+        return stack.slice(0, -1);
+    });
+}
+
+export function resetToView(view: AppView) {
+    viewStack.set([view]);
+}
 
 export const isSidebarOpen = writable<boolean>(false);
 

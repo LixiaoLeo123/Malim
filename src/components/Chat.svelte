@@ -4,6 +4,8 @@
 	import { invoke } from "@tauri-apps/api/core";
 	import {
 		currentView,
+		pushView,
+		popView,
 		settings,
 		translatorLabTransfer,
 		dictionarySearchQuery,
@@ -166,13 +168,13 @@
 	function searchInDictionary(text: string) {
 		clearTimeout(pressTimer);
 		dictionarySearchQuery.set(text.trim());
-		$currentView = "dictionary";
+		pushView("dictionary");
 		closeContextMenu();
 	}
 
 	function sendToTranslatorLab(text: string, mode: "fill" | "parse") {
 		translatorLabTransfer.set({ text, mode });
-		$currentView = "translator";
+		pushView("translator");
 		closeContextMenu();
 	}
 
@@ -617,7 +619,7 @@
 	}
 
 	function handleBack() {
-		$currentView = "home";
+		popView();
 	}
 
 	async function handleInput(e: Event) {
@@ -1920,13 +1922,13 @@
 	.mine .bubble {
 		background-color: var(--bubble-mine);
 		color: var(--bubble-mine-text);
-		border-radius: 8px;
+		border-radius: 6px;
 	}
 
 	.theirs .bubble {
 		background-color: var(--bubble-theirs);
 		color: var(--bubble-theirs-text);
-		border-radius: 8px;
+		border-radius: 6px;
 	}
 
 	.bubble::before {

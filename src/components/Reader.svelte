@@ -5,6 +5,8 @@
         isSidebarOpen,
         settings,
         currentView,
+        pushView,
+        popView,
         dictionarySearchQuery,
     } from "../lib/stores";
     import {
@@ -24,6 +26,10 @@
     import { invoke } from "@tauri-apps/api/core";
 
     $: article = $articles.find((a) => a.id === $activeArticleId) as any;
+
+    $: if ($currentView === "reader" && !article) {
+        popView();
+    }
 
     let containerEl: HTMLElement | null = null;
     let lastClickedBlock: Block | null = null;
@@ -352,7 +358,7 @@
     function searchInDictionary(text: string) {
         clearTimeout(pressTimer);
         dictionarySearchQuery.set(text.trim());
-        $currentView = "dictionary";
+        pushView("dictionary");
     }
 
     function onPointerDown(e: PointerEvent | TouchEvent, text: string) {

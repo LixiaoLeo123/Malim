@@ -8,7 +8,8 @@
     import {
         articles,
         activeArticleId,
-        currentView,
+        pushView,
+        resetToView,
         isSidebarOpen,
         editorDraft,
         settings,
@@ -56,34 +57,34 @@
 
     function handleAdd() {
         activeArticleId.set(null);
-        currentView.set("editor");
+        pushView("editor");
         isSidebarOpen.set(false);
     }
 
     function handleDiscover() {
-        currentView.set("discover");
+        pushView("discover");
         isSidebarOpen.set(false);
     }
 
     function handleChat() {
-        currentView.set("chat");
+        pushView("chat");
         isSidebarOpen.set(false);
     }
 
     function handleTranslator() {
-        currentView.set("translator");
+        pushView("translator");
         isSidebarOpen.set(false);
     }
 
     function handleDictionary() {
-        currentView.set("dictionary");
+        pushView("dictionary");
         isSidebarOpen.set(false);
     }
 
     function openArticle(article: Article) {
         if (article.status === "parsing" || article.status === "error") return;
         activeArticleId.set(article.id);
-        currentView.set("reader");
+        resetToView("reader");
         isSidebarOpen.set(false);
     }
 
@@ -125,7 +126,7 @@
         });
 
         if (activeIdWasDeleted) {
-            currentView.set("home");
+            resetToView("home");
         }
 
         isSelectMode = false;
@@ -143,7 +144,7 @@
         contextMenuTarget = null;
         activeArticleId.update((currentId) => {
             if (currentId === id) {
-                currentView.set("home");
+                resetToView("home");
                 return null;
             }
             return currentId;
@@ -158,7 +159,7 @@
             language: article.language,
         });
         activeArticleId.set(article.id);
-        currentView.set("editor");
+        pushView("editor");
         contextMenuTarget = null;
         isSidebarOpen.set(false);
     }

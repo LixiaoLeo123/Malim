@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { currentView } from "../lib/stores";
+    import { currentView, popView } from "../lib/stores";
     import {
         ArrowLeft,
         ChevronDown,
@@ -291,7 +291,7 @@
     }
 
     function goBack() {
-        currentView.set("home");
+        popView();
     }
 
     function closeArticle() {

@@ -5,7 +5,7 @@
 	import { invoke } from "@tauri-apps/api/core";
 	import { v4 as uuidv4 } from "uuid";
 	import { ArrowLeft, ChevronDown, Languages, LoaderCircle, Sparkles, Trash2, X } from "lucide-svelte";
-	import { currentView, settings, translatorLabTransfer, translatorSessions } from "../lib/stores";
+	import { pushView, popView, settings, translatorLabTransfer, translatorSessions, dictionarySearchQuery } from "../lib/stores";
 	import { notifications } from "$lib/notificationStore";
 	import type { Block, Sentence, TranslatorSession } from "../lib/types";
 	import WordPopover from "./WordPopover.svelte";
@@ -290,6 +290,26 @@
 		if (stop) stopAudio();
 	}
 
+	let pressTimer: number;
+
+	function searchInDictionary(text: string) {
+		clearTimeout(pressTimer);
+		dictionarySearchQuery.set(text.trim());
+		pushView("dictionary");
+	}
+
+	function onPointerDown(e: PointerEvent | TouchEvent, text: string) {
+		pressTimer = window.setTimeout(() => {
+			searchInDictionary(text);
+		}, 500);
+	}
+
+	function onPointerUp() {
+		if (pressTimer) {
+			clearTimeout(pressTimer);
+		}
+	}
+
 	function handleBlockClick(event: MouseEvent, block: Block, sentence: Sentence) {
 		event.stopPropagation();
 		if (block.pos === "unknown" || block.pos === "punctuation" || block.pos === "error") return;
@@ -322,7 +342,7 @@
 	}
 
 	function handleBack() {
-		$currentView = "home";
+		popView();
 	}
 
 	$: if ($translatorLabTransfer) {
@@ -410,6 +430,14 @@
 					</div>
 					<textarea
 						bind:value={englishText}
+						on:keydown={(e) => {
+							if (e.key === 'Enter' && !e.shiftKey) {
+								e.preventDefault();
+								if (!isTranslating && englishText.trim()) {
+									translateEnglishToRussian();
+								}
+							}
+						}}
 						class="min-h-[140px] flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-relaxed outline-none placeholder:text-zinc-300 dark:placeholder:text-zinc-600 md:min-h-[180px] md:px-5 md:py-4 md:text-[16px]"
 						placeholder="Write or paste English text here"
 					></textarea>
@@ -439,6 +467,14 @@
 					</div>
 					<textarea
 						bind:value={russianText}
+						on:keydown={(e) => {
+							if (e.key === 'Enter' && !e.shiftKey) {
+								e.preventDefault();
+								if (russianText.trim()) {
+									parseRussianText();
+								}
+							}
+						}}
 						class="min-h-[140px] flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-relaxed outline-none placeholder:text-zinc-300 dark:placeholder:text-zinc-600 md:min-h-[180px] md:px-5 md:py-4 md:text-[16px]"
 						placeholder="The Russian translation appears here"
 					></textarea>
@@ -569,7 +605,13 @@
 																		{#if block.pos === "punctuation"}
 																			<span class="analysis-block {getBlockPosClass(block, 'RU')}">{block.text}</span>
 																		{:else}
-																			<button class="analysis-block rounded-md px-1 py-0.5 transition-transform duration-75 ease-out active:scale-95 {getBlockPosClass(block, 'RU')}" on:click|stopPropagation={(e) => handleBlockClick(e, block, sentence)}>
+																			<button class="analysis-block rounded-md px-1 py-0.5 transition-transform duration-75 ease-out active:scale-95 {getBlockPosClass(block, 'RU')}"
+																				on:click|stopPropagation={(e) => handleBlockClick(e, block, sentence)}
+																				on:contextmenu|preventDefault={(e) => searchInDictionary(block.lemma || block.text)}
+																				on:pointerdown={(e) => onPointerDown(e, block.lemma || block.text)}
+																				on:pointerup={onPointerUp}
+																				on:pointercancel={onPointerUp}
+																			>
 																				{block.text}
 																				{#if (block.pos === "noun" || block.pos === "pronoun") && block.gram_case}
 																					<sup class="ml-0.5 text-[10px] font-bold opacity-70">{block.gram_case}</sup>

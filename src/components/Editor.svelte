@@ -1,6 +1,6 @@
 <script lang="ts">
     import {
-        currentView,
+        popView,
         editorDraft,
         articles,
         activeArticleId,
@@ -24,7 +24,7 @@
         : 0;
 
     function goBack() {
-        currentView.set("home");
+        popView();
     }
     onDestroy(() => {
         // if (unlisten) unlisten();
@@ -80,7 +80,7 @@
         }
 
         editorDraft.set({ title: "", content: "", language: "RU" });
-        currentView.set("home");
+        popView();
         parsingQueue.update((q) => [...q, id]);
         processQueue();
         notifications.success(isEditMode ? "Article updated!" : 
