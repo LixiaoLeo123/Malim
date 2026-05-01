@@ -52,7 +52,7 @@ mod brain;
 mod resolver;
 mod dict;
 use brain::get_brain_words;
-use dict::search_russian_dictionary;
+use dict::{preload_russian_dictionary, search_russian_dictionary};
 
 pub fn build_prompt(
     lang: &str,
@@ -2126,6 +2126,7 @@ pub fn run() {
             get_backup_definitions,
             execute_import,
             get_brain_words,
+            preload_russian_dictionary,
             search_russian_dictionary,
             update_chat_parsed
         ])

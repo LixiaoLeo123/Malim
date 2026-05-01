@@ -87,7 +87,7 @@ pub async fn chat_completion(
         "temperature": 0.6,
         "thinking": {"type": "disabled"}
     });
-
+    dbg!(&body);
     let client = Client::new();
     let resp = client
         .post(api_url)

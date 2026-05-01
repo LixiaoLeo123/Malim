@@ -1,6 +1,6 @@
 [package]
 name = "malim"
-version = "0.5.0"
+version = "0.5.1"
 description = "A language learning app"
 authors = ["Drantiss"]
 edition = "2021"

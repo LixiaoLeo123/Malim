@@ -1922,13 +1922,13 @@
 	.mine .bubble {
 		background-color: var(--bubble-mine);
 		color: var(--bubble-mine-text);
-		border-radius: 6px;
+		border-radius: 4px;
 	}
 
 	.theirs .bubble {
 		background-color: var(--bubble-theirs);
 		color: var(--bubble-theirs-text);
-		border-radius: 6px;
+		border-radius: 4px;
 	}
 
 	.bubble::before {

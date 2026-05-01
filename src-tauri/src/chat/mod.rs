@@ -227,7 +227,7 @@ impl MemoryHandler {
         } {
             if let Some(last_log) = recent_logs.into_iter().next() {
                 if let Some(last_msg) = history.last_mut() {
-                    last_msg.1.push_str(&format!("\n[Time: {}]", last_log.3));
+                    last_msg.1.push_str(&format!("\n(Sent at: {})", last_log.3));
                 }
             }
         }
@@ -350,16 +350,17 @@ impl MemoryHandler {
 
         let (final_summary, mut final_history) = Self::parse_context(&final_context);
         
-        if let Ok(recent_logs) = {
-            let db_lock = self.db.lock().await;
-            db_lock.get_latest_logs(1)
-        } {
-            if let Some(last_log) = recent_logs.into_iter().next() {
-                if let Some(last_msg) = final_history.last_mut() {
-                    last_msg.1.push_str(&format!("\n[Time: {}]", last_log.3));
-                }
-            }
-        }
+        // doesn't work well, ai may get confused, so commenting out for now
+        // if let Ok(recent_logs) = {
+        //     let db_lock = self.db.lock().await;
+        //     db_lock.get_latest_logs(1)
+        // } {
+        //     if let Some(last_log) = recent_logs.into_iter().next() {
+        //         if let Some(last_msg) = final_history.last_mut() {
+        //             last_msg.1.push_str(&format!("\n(Sent at: {})", last_log.3));
+        //         }
+        //     }
+        // }
 
         let main_ai_future = chat_completion(
             main_api.0,

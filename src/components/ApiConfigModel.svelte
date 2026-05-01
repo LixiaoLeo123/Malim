@@ -78,6 +78,7 @@
     let tempCriticalValue = 80;
     let tempAutoSpeak = true;
     let tempPreCacheAudio = true;
+    let tempPreloadDict = true;
     let tempTtsConcurrency = 1;
     type TtsApi = "edge-tts" | "qwen3-tts" | "silero-tts";
     let tempTtsApi: TtsApi = "edge-tts";
@@ -111,6 +112,7 @@
         tempCriticalValue = $settings.criticalValue;
         tempAutoSpeak = $settings.autoSpeak;
         tempPreCacheAudio = $settings.preCacheAudio;
+        tempPreloadDict = $settings.preloadDict ?? true;
         tempTtsConcurrency = $settings.ttsConcurrency;
         tempTtsApi = $settings.ttsApi ?? "edge-tts";
         tempSileroUrl = $settings.sileroUrl ?? "";
@@ -284,6 +286,7 @@
             criticalValue: tempCriticalValue,
             autoSpeak: tempAutoSpeak,
             preCacheAudio: tempPreCacheAudio,
+            preloadDict: tempPreloadDict,
             ttsConcurrency: tempTtsConcurrency,
             ttsApi: tempTtsApi,
             sileroUrl: tempSileroUrl.trim(),
@@ -586,6 +589,7 @@
                     step={1}
                     class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
                     style="appearance: textfield; -moz-appearance: textfield;"
+                    placeholder="6"
                 />
                 <style>
                     input[type="number"]::-webkit-inner-spin-button,
@@ -615,9 +619,10 @@
                     step={1}
                     class="w-full text-sm bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white dark:focus:ring-zinc-500"
                     style="appearance: textfield; -moz-appearance: textfield;"
+                    placeholder="80"
                 />
                 <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    Recommended: 80. Larger values allow longer AI batches.
+                    Larger values allow longer AI batches.
                 </p>
             </label>
 
@@ -676,6 +681,27 @@
                 >
                     <span
                         class="inline-block h-5 w-5 transform rounded-full bg-white dark:bg-zinc-900 transition-transform {tempMemoryModelEnabled
+                            ? 'translate-x-5'
+                            : 'translate-x-1'}"
+                    ></span>
+                </button>
+            </div>
+
+            <hr class="border-zinc-200 dark:border-zinc-700 my-4" />
+
+            <div class="flex items-center justify-between mt-3 mb-2">
+                <span class="text-sm text-zinc-600 dark:text-zinc-300"
+                    >Preload Dictionary Data</span
+                >
+                <button
+                    type="button"
+                    class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempPreloadDict
+                        ? 'bg-zinc-900 dark:bg-zinc-100'
+                        : 'bg-zinc-300 dark:bg-zinc-700'}"
+                    on:click={() => (tempPreloadDict = !tempPreloadDict)}
+                >
+                    <span
+                        class="inline-block h-5 w-5 transform rounded-full bg-white dark:bg-zinc-900 transition-transform {tempPreloadDict
                             ? 'translate-x-5'
                             : 'translate-x-1'}"
                     ></span>

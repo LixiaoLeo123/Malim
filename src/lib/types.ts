@@ -122,6 +122,7 @@ export interface Settings {
   showGrammarNotes: boolean;
   autoSpeak: boolean;
   preCacheAudio: boolean;
+  preloadDict: boolean;
   ttsConcurrency: number;
   ttsApi: "edge-tts" | "qwen3-tts" | "silero-tts";
   qwenApiKey: string;

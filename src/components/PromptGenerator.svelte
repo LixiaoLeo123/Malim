@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { fly, fade } from "svelte/transition";
+    import { fly } from "svelte/transition";
+    import { fade } from "svelte/transition";
     import { invoke } from "@tauri-apps/api/core";
     import { X, Copy, Check } from "lucide-svelte";
     import { slide } from "svelte/transition";

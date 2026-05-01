@@ -372,7 +372,7 @@
             <div class="space-y-[3px]">
                 {#each visibleArticles as article (article.id)}
                     <div
-                        class="relative group rounded-xl bg-transparent select-none touch-manipulation hover:bg-white dark:hover:bg-zinc-900 overflow-hidden transition-all duration-200 ease-out active:scale-[0.99] active:bg-zinc-100 dark:active:bg-zinc-800 border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 hover:shadow-sm"
+                        class="relative group rounded-xl select-none touch-manipulation overflow-hidden transition-all duration-200 ease-out active:scale-[0.99] active:bg-zinc-100 dark:active:bg-zinc-800 border {article.id === $activeArticleId ? 'bg-purple-50/50 dark:bg-purple-500/10 border-purple-200/60 dark:border-purple-500/20 shadow-sm' : 'bg-transparent border-transparent hover:bg-white dark:hover:bg-zinc-900 hover:border-zinc-200/50 dark:hover:border-zinc-800 hover:shadow-sm'}"
                         class:opacity-60={article.status === "parsing"}
                         class:bg-amber-50_30={article.stared}
                         class:dark:bg-amber-500_5={article.stared}
@@ -401,7 +401,9 @@
                             article.status !== "parsing" &&
                             !isSelectMode &&
                             startPress(article.id)}
+                        on:touchmove={endPress}
                         on:touchend={endPress}
+                        on:touchcancel={endPress}
                         on:keydown={(e) =>
                             e.key === "Enter" && openArticle(article)}
                     >
@@ -437,7 +439,7 @@
                         <div class="px-3 py-2.5 flex flex-col gap-1.5 z-10 relative {article.stared ? 'pl-4' : ''}">
                             <div class="flex items-start justify-between gap-3">
                                 <h3
-                                    class="font-semibold text-zinc-800 text-[13.5px] leading-snug dark:text-zinc-200 line-clamp-2 {isSelectMode ? 'pr-8' : 'pr-1'}"
+                                    class="font-semibold text-[13.5px] leading-snug line-clamp-2 {isSelectMode ? 'pr-8' : 'pr-1'} {article.id === $activeArticleId ? 'text-purple-700 dark:text-purple-300' : 'text-zinc-800 dark:text-zinc-200'}"
                                 >
                                     {article.title || "Untitled"}
                                 </h3>

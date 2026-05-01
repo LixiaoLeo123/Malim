@@ -97,9 +97,10 @@ const defaultSettings: Settings = {
 
   concurrency: 1,
     criticalValue: 80,
-  showGrammarNotes: true,
-  autoSpeak: false,
+  showGrammarNotes: false,
+  autoSpeak: true,
   preCacheAudio: true,
+  preloadDict: true,
   ttsConcurrency: 1,
   ttsApi: "edge-tts",
   qwenApiKey: '',
@@ -238,4 +239,8 @@ async function save() {
     dictionaryHistory.subscribe(save);
     editorDraft.subscribe(save);
     settings.subscribe(save);
+
+    if (get(settings).preloadDict) {
+        invoke('preload_russian_dictionary').catch(console.error);
+    }
 })();

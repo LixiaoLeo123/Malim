@@ -37,6 +37,15 @@ const EMBEDDED_MDX: &[u8] = include_bytes!("assets/OpenRussian.mdx");
 const EMBEDDED_MDD: &[u8] = include_bytes!("assets/OpenRussian.mdd");
 
 #[tauri::command]
+pub async fn preload_russian_dictionary(app: AppHandle) -> Result<(), String> {
+	tokio::task::spawn_blocking(move || {
+		let _ = dictionary_service(&app);
+	})
+	.await
+	.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn search_russian_dictionary(
 	app: AppHandle,
 	query: String,
