@@ -69,6 +69,7 @@
             readProgress: existingArticle?.readProgress || 0,
             completedCheckpointsList: existingArticle?.completedCheckpointsList || [],
             stared: existingArticle?.stared || false,
+            tags: existingArticle?.tags || [],
         };
 
         if (isEditMode) {

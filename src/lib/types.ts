@@ -1,56 +1,57 @@
 export interface Block {
-    text: string;
-    pos: string; // word class
-    definition: string;
-    chinese_root?: string;
-    grammar_note?: string;
-    audio_path?: string | null;
-    // Russian-specific fields:
-    lemma?: string | null;
-    gram_case?: number | null;
-    gram_gender?: "m" | "f" | "n" | null;
-    gram_number?: "sg" | "pl" | null;
-    tense?: string | null;
-    aspect?: "pf" | "impf" | null;
+  text: string;
+  pos: string; // word class
+  definition: string;
+  chinese_root?: string;
+  grammar_note?: string;
+  audio_path?: string | null;
+  // Russian-specific fields:
+  lemma?: string | null;
+  gram_case?: number | null;
+  gram_gender?: "m" | "f" | "n" | null;
+  gram_number?: "sg" | "pl" | null;
+  tense?: string | null;
+  aspect?: "pf" | "impf" | null;
 }
 
 export interface Sentence {
-    id: string;
-    original: string;
-    blocks: Block[];
-    translation: string;
-    audio_path?: string | null;
+  id: string;
+  original: string;
+  blocks: Block[];
+  translation: string;
+  audio_path?: string | null;
 }
 
 export interface Article {
-    id: string;
-    title: string;
-    preview: string;
-    status: 'parsing' | 'done' | 'error';
-    parsingProgress: number;
-    sentences: Sentence[];
-    draftContent?: string;
-    language: string;
-    readProgress: number;
-    completedCheckpointsList: number[];
-    stared: boolean;
-    scrollPosition?: number;
+  id: string;
+  title: string;
+  preview: string;
+  status: 'parsing' | 'done' | 'error';
+  parsingProgress: number;
+  sentences: Sentence[];
+  draftContent?: string;
+  language: string;
+  readProgress: number;
+  completedCheckpointsList: number[];
+  stared: boolean;
+  scrollPosition?: number;
+  tags: string[];
 }
 
-  export interface TranslatorSession {
-    id: string;
-    sourceText: string;
-    status: 'parsing' | 'done' | 'error';
-    progress: number;
-    expanded: boolean;
-    sentences: Sentence[] | null;
-    createdAt: number;
-  }
+export interface TranslatorSession {
+  id: string;
+  sourceText: string;
+  status: 'parsing' | 'done' | 'error';
+  progress: number;
+  expanded: boolean;
+  sentences: Sentence[] | null;
+  createdAt: number;
+}
 
 export interface Draft {
-    title: string;
-    content: string;
-    language: string;
+  title: string;
+  content: string;
+  language: string;
 }
 
 export interface AiConfig {
@@ -109,15 +110,13 @@ export interface DictionarySearchResponse {
   results: DictionaryEntry[];
 }
 
-
 export interface Settings {
   aiConfigList: AiConfig[];
   defaultAiConfigId: string; // Default (Article Parsing)
-  mainAiConfigId: string;    // Main Chat AI
-  shadowAiConfigId: string;  // Shadow AI (Memory)
-  embedAiConfigId: string;   // Embedding Model (RAG)
+  mainAiConfigId: string; // Main Chat AI
+  shadowAiConfigId: string; // Shadow AI (Memory)
+  embedAiConfigId: string; // Embedding Model (RAG)
   grammarAiConfigId: string; // Grammar Correction AI
-
   concurrency: number;
   criticalValue: number;
   showGrammarNotes: boolean;
@@ -133,7 +132,7 @@ export interface Settings {
   ruaccentUrl: string;
   syncEnabled: boolean;
   syncServerUrl: string;
-  userId: string; 
+  userId: string;
   memoryModelEnabled: boolean;
   maxTotalTokens: number;
   maxRagTokens: number;

@@ -4,69 +4,56 @@ import { invoke } from '@tauri-apps/api/core'
 import { get } from 'svelte/store'
 
 export type AppView =
-    | 'home'
-    | 'editor'
-    | 'reader'
-    | 'discover'
-    | 'chat'
-    | 'translator'
-    | 'dictionary';
+  | 'home'
+  | 'editor'
+  | 'reader'
+  | 'discover'
+  | 'chat'
+  | 'translator'
+  | 'dictionary';
 
 const HOME_VIEW: AppView = 'home';
 const MAX_VIEW_STACK_SIZE = 64;
 
 export const viewStack = writable<AppView[]>([HOME_VIEW]);
+
 export const currentView = derived(viewStack, ($stack) =>
-    $stack[$stack.length - 1] ?? HOME_VIEW,
+  $stack[$stack.length - 1] ?? HOME_VIEW,
 );
 
 export function pushView(view: AppView) {
-    viewStack.update((stack) => {
-        const safeStack = stack.length > 0 ? stack : [HOME_VIEW];
-        if (safeStack[safeStack.length - 1] === view) return safeStack;
-
-        const next = [...safeStack, view];
-        if (next.length <= MAX_VIEW_STACK_SIZE) return next;
-
-        // Keep home pinned at the bottom when trimming long stacks.
-        return [HOME_VIEW, ...next.slice(next.length - (MAX_VIEW_STACK_SIZE - 1))];
-    });
+  viewStack.update((stack) => {
+    const safeStack = stack.length > 0 ? stack : [HOME_VIEW];
+    if (safeStack[safeStack.length - 1] === view) return safeStack;
+    const next = [...safeStack, view];
+    if (next.length <= MAX_VIEW_STACK_SIZE) return next;
+    // Keep home pinned at the bottom when trimming long stacks.
+    return [HOME_VIEW, ...next.slice(next.length - (MAX_VIEW_STACK_SIZE - 1))];
+  });
 }
 
 export function popView() {
-    viewStack.update((stack) => {
-        if (stack.length <= 1) return [HOME_VIEW];
-        return stack.slice(0, -1);
-    });
+  viewStack.update((stack) => {
+    if (stack.length <= 1) return [HOME_VIEW];
+    return stack.slice(0, -1);
+  });
 }
 
 export function resetToView(view: AppView) {
-    viewStack.set([view]);
+  viewStack.set([view]);
 }
 
 export const isSidebarOpen = writable<boolean>(false);
 
 export const articles = writable<Article[]>([]);
-// export const articles = writable<Article[]>([
-//     {
-//         id: '1',
-//         title: 'Sample Korean Text',
-//         preview: 'This is a draft preview...',
-//         status: 'done',
-//         parsingProgress: 100,
-//         sentences: [], 
-//         draftContent: '',
-//         language: 'KR'
-//     }
-// ]);
 
 export const activeArticleId = writable<string | null>(null);
 
 export const translatorSessions = writable<TranslatorSession[]>([]);
 
 export type TranslatorLabTransfer = {
-    text: string;
-    mode: 'fill' | 'parse';
+  text: string;
+  mode: 'fill' | 'parse';
 };
 
 export const translatorLabTransfer = writable<TranslatorLabTransfer | null>(null);
@@ -75,28 +62,20 @@ export const dictionaryHistory = writable<DictionaryHistoryEntry[]>([]);
 export const dictionarySearchQuery = writable<string | null>(null);
 
 export const editorDraft = writable<Draft>({
-    title: '',
-    content: '',
-    language: 'RU'
+  title: '',
+  content: '',
+  language: 'RU'
 });
-
-
-
-// function generateId() {
-//   return Date.now().toString(36) + Math.random().toString(36).substring(2);
-// }
 
 const defaultSettings: Settings = {
   aiConfigList: [],
-  
   defaultAiConfigId: '',
   mainAiConfigId: '',
   shadowAiConfigId: '',
   embedAiConfigId: '',
   grammarAiConfigId: '',
-
   concurrency: 1,
-    criticalValue: 80,
+  criticalValue: 80,
   showGrammarNotes: false,
   autoSpeak: true,
   preCacheAudio: true,
@@ -112,10 +91,10 @@ const defaultSettings: Settings = {
   syncServerUrl: '',
   userId: '',
   memoryModelEnabled: true,
-    maxTotalTokens: 4000,
-    maxRagTokens: 1000,
-    maxRagAppendTokens: 1000,
-    maxUserTokens: 500,
+  maxTotalTokens: 4000,
+  maxRagTokens: 1000,
+  maxRagAppendTokens: 1000,
+  maxUserTokens: 500,
   userAvatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=User' ,
   aiAvatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Malim' ,
   proactiveEvent: null,
@@ -132,115 +111,105 @@ const IPC_RETRY_DELAY_MS = 200;
 const IPC_MAX_RETRIES = 60;
 
 function sleep(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function load() {
-    const raw = await invoke<string>('load_data');
-    if (!raw || raw.trim().length === 0) {
-        throw new Error('load_data returned empty payload');
-    }
+  const raw = await invoke<string>('load_data');
+  if (!raw || raw.trim().length === 0) {
+    throw new Error('load_data returned empty payload');
+  }
+  const data = JSON.parse(raw);
 
-    const data = JSON.parse(raw);
+  if (data.articles) {
+    const cleanArticles = data.articles.map((item: Article) => {
+      const base = { ...item, tags: Array.isArray(item.tags) ? item.tags : [] };
+      if (item.status === "parsing") {
+        return { ...base, status: "error" as const };
+      }
+      return base;
+    });
+    articles.set(cleanArticles);
+  }
 
-    if (data.articles) {
-        const cleanArticles = data.articles.map((item: Article) => {
-            if (item.status === "parsing") {
-                return { ...item, status: "error" as const };
-            }
-            return item;
-        });
-        articles.set(cleanArticles);
-    }
+  if (data.translatorSessions) {
+    const cleanTranslatorSessions = (data.translatorSessions as TranslatorSession[]).map((item) =>
+      item.status === 'parsing'
+        ? { ...item, status: 'error' as const, progress: 0 }
+        : item,
+    );
+    translatorSessions.set(cleanTranslatorSessions.slice(0, 256));
+  }
 
-    if (data.translatorSessions) {
-        const cleanTranslatorSessions = (data.translatorSessions as TranslatorSession[]).map((item) =>
-            item.status === 'parsing'
-                ? {
-                    ...item,
-                    status: 'error' as const,
-                    progress: 0,
-                }
-                : item,
-        );
-        translatorSessions.set(cleanTranslatorSessions.slice(0, 256));
-    }
-    
-    if (data.draft) editorDraft.set(data.draft);
-    if (data.settings) settings.set({ ...defaultSettings, ...data.settings });
+  if (data.draft) editorDraft.set(data.draft);
+  if (data.settings) settings.set({ ...defaultSettings, ...data.settings });
 
-    if (Array.isArray(data.dictionaryHistory)) {
-        const rawDictionaryHistory: Array<Partial<DictionaryHistoryEntry>> = data.dictionaryHistory;
-        const cleanDictionaryHistory: DictionaryHistoryEntry[] = rawDictionaryHistory
-            .filter((item): item is Partial<DictionaryHistoryEntry> => typeof item?.query === 'string')
-            .map((item: Partial<DictionaryHistoryEntry>) => {
-                const query = item.query!.trim();
-                const resultCount = Number(item.resultCount);
-                const searchedAt = Number(item.searchedAt);
-
-                return {
-                    query,
-                    normalizedQuery: typeof item.normalizedQuery === 'string' ? item.normalizedQuery : query.toLowerCase(),
-                    resultCount: Number.isFinite(resultCount) ? resultCount : 0,
-                    searchedAt: Number.isFinite(searchedAt) ? searchedAt : Date.now(),
-                };
-            })
-            .filter((item: DictionaryHistoryEntry) => item.query.length > 0)
-            .slice(0, 128);
-        dictionaryHistory.set(cleanDictionaryHistory);
-    }
+  if (Array.isArray(data.dictionaryHistory)) {
+    const rawDictionaryHistory: Array<Partial<DictionaryHistoryEntry>> = data.dictionaryHistory;
+    const cleanDictionaryHistory: DictionaryHistoryEntry[] = rawDictionaryHistory
+      .filter((item): item is Partial<DictionaryHistoryEntry> => typeof item?.query === 'string')
+      .map((item: Partial<DictionaryHistoryEntry>) => {
+        const query = item.query!.trim();
+        const resultCount = Number(item.resultCount);
+        const searchedAt = Number(item.searchedAt);
+        return {
+          query,
+          normalizedQuery: typeof item.normalizedQuery === 'string' ? item.normalizedQuery : query.toLowerCase(),
+          resultCount: Number.isFinite(resultCount) ? resultCount : 0,
+          searchedAt: Number.isFinite(searchedAt) ? searchedAt : Date.now(),
+        };
+      })
+      .filter((item: DictionaryHistoryEntry) => item.query.length > 0)
+      .slice(0, 128);
+    dictionaryHistory.set(cleanDictionaryHistory);
+  }
 }
 
 async function loadWithIpcRetry() {
-    let lastError: unknown = null;
-
-    for (let attempt = 1; attempt <= IPC_MAX_RETRIES; attempt++) {
-        try {
-            await load();
-            return;
-        } catch (e) {
-            lastError = e;
-            if (attempt < IPC_MAX_RETRIES) {
-                if (attempt === 1 || attempt % 10 === 0) {
-                    console.warn(`Waiting for Tauri IPC bridge... retry ${attempt}/${IPC_MAX_RETRIES}`);
-                }
-                await sleep(IPC_RETRY_DELAY_MS);
-            }
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= IPC_MAX_RETRIES; attempt++) {
+    try {
+      await load();
+      return;
+    } catch (e) {
+      lastError = e;
+      if (attempt < IPC_MAX_RETRIES) {
+        if (attempt === 1 || attempt % 10 === 0) {
+          console.warn(`Waiting for Tauri IPC bridge... retry ${attempt}/${IPC_MAX_RETRIES}`);
         }
+        await sleep(IPC_RETRY_DELAY_MS);
+      }
     }
-
-    console.error('Failed to load app state after IPC retries:', lastError);
+  }
+  console.error('Failed to load app state after IPC retries:', lastError);
 }
 
 let saveTimeout: ReturnType<typeof setTimeout> | undefined = undefined;
+
 async function save() {
-    clearTimeout(saveTimeout);
-
-    saveTimeout = setTimeout(async () => {
-        const snapshot = {
-            articles: get(articles),
-            translatorSessions: get(translatorSessions).slice(0, 256),
-            dictionaryHistory: get(dictionaryHistory).slice(0, 128),
-            draft: get(editorDraft),
-            settings: get(settings)
-        };
-
-        await invoke('save_data', {
-            data: JSON.stringify(snapshot)
-        });
-    }, 500);
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(async () => {
+    const snapshot = {
+      articles: get(articles),
+      translatorSessions: get(translatorSessions).slice(0, 256),
+      dictionaryHistory: get(dictionaryHistory).slice(0, 128),
+      draft: get(editorDraft),
+      settings: get(settings)
+    };
+    await invoke('save_data', { data: JSON.stringify(snapshot) });
+  }, 500);
 }
 
 (async () => {
-    await sleep(IPC_INITIAL_DELAY_MS);
-    await loadWithIpcRetry();
-    articles.subscribe(save);
-    translatorSessions.subscribe(save);
-    dictionaryHistory.subscribe(save);
-    editorDraft.subscribe(save);
-    settings.subscribe(save);
+  await sleep(IPC_INITIAL_DELAY_MS);
+  await loadWithIpcRetry();
+  articles.subscribe(save);
+  translatorSessions.subscribe(save);
+  dictionaryHistory.subscribe(save);
+  editorDraft.subscribe(save);
+  settings.subscribe(save);
 
-    if (get(settings).preloadDict) {
-        invoke('preload_russian_dictionary').catch(console.error);
-    }
+  if (get(settings).preloadDict) {
+    invoke('preload_russian_dictionary').catch(console.error);
+  }
 })();
