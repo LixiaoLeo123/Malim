@@ -20,8 +20,8 @@
     import { fade, fly } from "svelte/transition";
     import Flag from "./Flag.svelte";
     import WordPopover from "./WordPopover.svelte";
-    import type { Sentence, Block, Article } from "../lib/types";
-    import { onMount, onDestroy } from "svelte";
+    import type { Sentence, Block } from "../lib/types";
+    import { onMount, onDestroy, tick } from "svelte";
     import { playAudio, stopAudio } from "../lib/audio";
     import { invoke } from "@tauri-apps/api/core";
 
@@ -31,7 +31,42 @@
         popView();
     }
 
+    let currentScroll = 0;
+    let lastArticleId: string | null = null;
+    let scrollTimeout: any;
+
+    $: if (article && article.id !== lastArticleId) {
+        lastArticleId = article.id;
+        tick().then(() => {
+            currentScroll = article.scrollPosition || 0;
+            if (scrollContainerEl) {
+                scrollContainerEl.scrollTop = currentScroll;
+            }
+        });
+    }
+
+    $: if (article && article.id === lastArticleId && currentScroll !== undefined) {
+        if (Math.abs(currentScroll - (article.scrollPosition || 0)) > 5) {
+            clearTimeout(scrollTimeout);
+            scrollTimeout = setTimeout(() => {
+                articles.update(all => {
+                    const target = all.find(a => a.id === article.id);
+                    if (target) {
+                        target.scrollPosition = currentScroll;
+                    }
+                    return all;
+                });
+            }, 500);
+        }
+    }
+
     let containerEl: HTMLElement | null = null;
+    let scrollContainerEl: HTMLElement | null = null;
+
+    function containerScroll() {
+        if (!scrollContainerEl) return;
+        currentScroll = scrollContainerEl.scrollTop;
+    }
     let lastClickedBlock: Block | null = null;
     let activeBlock: Block | null = null;
     let activeBlockEl: HTMLElement | null = null;
@@ -452,6 +487,8 @@
     </div>
 
     <div
+        bind:this={scrollContainerEl}
+        on:scroll={containerScroll}
         class="flex-1 overflow-y-auto p-6 md:p-10 leading-loose text-lg md:text-xl font-medium text-zinc-800 dark:text-zinc-200 pb-[35vh]"
     >
         {#if article && article.sentences && sections.length > 0}
@@ -509,10 +546,14 @@
                 {sectionIdx === sections.length - 1
                                 ? completedCheckpoints.has(sectionIdx)
                                     ? 'border-cyan-400 text-cyan-500 bg-cyan-50 dark:bg-cyan-900/30'
-                                    : 'border-zinc-200 dark:border-zinc-700 hover:border-cyan-400 hover:text-cyan-500 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 text-zinc-400 dark:text-zinc-600'
+                                    : (article?.completedCheckpointsList || []).includes(sectionIdx)
+                                        ? 'border-cyan-200 text-cyan-300 hover:border-cyan-400 hover:text-cyan-500 hover:bg-cyan-50 dark:border-cyan-800 dark:text-cyan-600 dark:hover:bg-cyan-900/30'
+                                        : 'border-zinc-200 dark:border-zinc-700 hover:border-cyan-400 hover:text-cyan-500 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 text-zinc-400 dark:text-zinc-600'
                                 : completedCheckpoints.has(sectionIdx)
                                   ? 'border-emerald-400 text-emerald-500 bg-emerald-50 dark:bg-emerald-900/30'
-                                  : 'border-zinc-200 dark:border-zinc-700 hover:border-emerald-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 text-zinc-400 dark:text-zinc-600'}"
+                                  : (article?.completedCheckpointsList || []).includes(sectionIdx)
+                                        ? 'border-emerald-200 text-emerald-300 hover:border-emerald-400 hover:text-emerald-500 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-600 dark:hover:bg-emerald-900/30'
+                                        : 'border-zinc-200 dark:border-zinc-700 hover:border-emerald-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 text-zinc-400 dark:text-zinc-600'}"
                             on:click|stopPropagation={() =>
                                 handleCheckpointClick(sectionIdx)}
                             title={sectionIdx === sections.length - 1
@@ -521,6 +562,12 @@
                         >
                             {#if completedCheckpoints.has(sectionIdx)}
                                 <CheckCircle2 size={20} />
+                            {:else if (article?.completedCheckpointsList || []).includes(sectionIdx)}
+                                {#if sectionIdx === sections.length - 1}
+                                    <Star size={18} />
+                                {:else}
+                                    <CheckCircle2 size={18} />
+                                {/if}
                             {:else if sectionIdx === sections.length - 1}
                                 <Star size={18} />
                             {:else}
@@ -550,7 +597,9 @@
             class="sentence-panel absolute bottom-0 left-0 right-0 z-50 bg-white border-t border-zinc-200 shadow-[0_-4px_20px_-4px_rgba(0,0,0,0.1)] rounded-t-2xl px-6 md:px-10 pt-3 pb-4 dark:bg-zinc-900 dark:border-zinc-800 flex flex-col"
             style="max-height: 30vh;"
             transition:fly={{ y: 50, duration: 250 }}
-            on:click|stopPropagation
+            on:pointerdown|stopPropagation
+            role="region"
+            aria-label="Sentence translation panel"
         >
             <div class="space-y-2 min-h-0 flex-1 flex flex-col">
                 <div

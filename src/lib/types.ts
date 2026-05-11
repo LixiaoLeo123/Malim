@@ -34,6 +34,7 @@ export interface Article {
     readProgress: number;
     completedCheckpointsList: number[];
     stared: boolean;
+    scrollPosition?: number;
 }
 
   export interface TranslatorSession {

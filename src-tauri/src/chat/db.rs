@@ -40,6 +40,7 @@ impl DbState {
         Ok(Self { conn })
     }
 
+    #[allow(dead_code)]
     pub fn append_log(&self, role: &str, content: &str) -> Result<(), String> {
         self.conn
             .execute(

@@ -73,7 +73,8 @@ fn search_russian_dictionary_blocking(
 	let mut service = service
 		.lock()
 		.map_err(|_| "dictionary service mutex poisoned".to_string())?;
-	let lemmatized_query = lemmatize_lookup_query(&service.morph, &cleaned_query);
+	// let lemmatized_query = lemmatize_lookup_query(&service.morph, &cleaned_query);
+	let lemmatized_query = cleaned_query.clone();
 	let normalized_query = normalize_lookup_key(&lemmatized_query);
 	if normalized_query.is_empty() {
 		return Ok(DictionarySearchResponse {
@@ -97,7 +98,7 @@ fn search_russian_dictionary_blocking(
 	let mut raw_results = Vec::new();
 	let mut seen = BTreeSet::new();
 	let mut selected_candidate: Option<String> = None;
-
+	dbg!(&lookup_terms);
 	for candidate in lookup_terms {
 		let normalized_candidate = normalize_lookup_key(&candidate);
 		if normalized_candidate.is_empty() {
@@ -125,7 +126,6 @@ fn search_russian_dictionary_blocking(
 			let entry = build_dictionary_entry(&mut service, &key_item, &candidate)?;
 			raw_results.push(entry);
 		}
-		break;
 	}
 
 	if selected_candidate.is_none() {
@@ -145,6 +145,7 @@ fn search_russian_dictionary_blocking(
 	})
 }
 
+#[allow(dead_code)]
 fn lemmatize_lookup_query(morph: &MorphAnalyzer, query: &str) -> String {
 	let cleaned = sanitize_query(query);
 	if cleaned.is_empty() {
@@ -243,13 +244,6 @@ fn build_lookup_candidates(morph: &MorphAnalyzer, query: &str) -> Vec<String> {
 				let normal_form = sanitize_query(&parsed.lex.get_normal_form(morph));
 				if !normal_form.is_empty() {
 					candidates.insert(normal_form);
-				}
-
-				for lex in parsed.lex.get_lexeme(morph).into_iter().take(64) {
-					let form = sanitize_query(&lex.get_word());
-					if !form.is_empty() {
-						candidates.insert(form);
-					}
 				}
 			}
 		}
