@@ -195,8 +195,10 @@
 	}
 
 	async function parseRussianText() {
-        russianText = "";
-		await parseRussianSourceText(russianText.trim(), true);
+		const text = russianText.trim();
+		if (!text) return;
+		russianText = "";
+		await parseRussianSourceText(text, true);
 	}
 
 	function handleJobCardClick(job: TranslatorSession) {
@@ -477,6 +479,10 @@
 						}}
 						class="min-h-[140px] flex-1 resize-none bg-transparent px-3 py-3 text-[15px] leading-relaxed outline-none placeholder:text-zinc-300 dark:placeholder:text-zinc-600 md:min-h-[180px] md:px-5 md:py-4 md:text-[16px]"
 						placeholder="The Russian translation appears here"
+						on:dblclick={() => {
+							const selection = window.getSelection()?.toString()?.trim();
+							if (selection) searchInDictionary(selection);
+						}}
 					></textarea>
 					<div class="flex items-center border-t border-zinc-100 p-2 dark:border-zinc-800 md:justify-end md:px-5 md:py-3 box-border">
 						<button
