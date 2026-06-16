@@ -10,4 +10,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 count.py
 __pycache__
-.vscode
+.vscodesrc-tauri/.cargo
+DOCS.md
+latestlog_0615
+/scripts

@@ -33,6 +33,8 @@
         <div class="text-base font-bold text-white pr-5 leading-snug">
             {block.definition}
         </div>
+
+        <!-- Russian plural badge -->
         {#if language === "RU" && block.gram_number === "pl"}
             <div
                 class="absolute top-1 right-1 w-4 h-4 rounded-full bg-purple-600 text-white text-[9px] flex items-center justify-center font-bold"
@@ -40,6 +42,17 @@
                 P
             </div>
         {/if}
+
+        <!-- Spanish plural badge -->
+        {#if language === "ES" && block.gram_number === "pl"}
+            <div
+                class="absolute top-1 right-1 w-4 h-4 rounded-full bg-amber-600 text-white text-[9px] flex items-center justify-center font-bold"
+            >
+                P
+            </div>
+        {/if}
+
+        <!-- Russian verb info -->
         {#if language === "RU" && block.pos === "verb"}
             <div class="flex gap-1.5 mt-1.5 text-[10px]">
                 {#if block.tense}
@@ -62,7 +75,45 @@
                 {/if}
             </div>
         {/if}
-        {#if language === "RU" && block.lemma}
+
+        <!-- Spanish verb info -->
+        {#if language === "ES" && block.pos === "verb"}
+            <div class="flex flex-wrap gap-1.5 mt-1.5 text-[10px]">
+                {#if block.tense}
+                    <div class="inline-block self-start bg-blue-500/15 text-blue-300 px-1 py-0.5 rounded border border-blue-500/40">
+                        {block.tense}
+                    </div>
+                {/if}
+                {#if block.mood}
+                    <div class="inline-block self-start bg-emerald-500/15 text-emerald-300 px-1 py-0.5 rounded border border-emerald-500/40">
+                        {block.mood}
+                    </div>
+                {/if}
+                {#if block.gram_person}
+                    <div class="inline-block self-start bg-violet-500/15 text-violet-300 px-1 py-0.5 rounded border border-violet-500/40">
+                        {block.gram_person}{block.gram_person === 1 ? 'st' : block.gram_person === 2 ? 'nd' : 'rd'} person
+                    </div>
+                {/if}
+            </div>
+        {/if}
+
+        <!-- Spanish article/gender info -->
+        {#if language === "ES" && (block.pos === "article" || block.pos === "noun" || block.pos === "adjective")}
+            <div class="flex gap-1.5 mt-1.5 text-[10px]">
+                {#if block.gram_gender}
+                    <div class="inline-block self-start px-1 py-0.5 rounded border {block.gram_gender === 'm' ? 'bg-violet-500/15 text-violet-300 border-violet-500/40' : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40'}">
+                        {block.gram_gender === "m" ? "masc." : "fem."}
+                    </div>
+                {/if}
+                {#if block.gram_number}
+                    <div class="inline-block self-start bg-zinc-500/15 text-zinc-300 px-1 py-0.5 rounded border border-zinc-500/40">
+                        {block.gram_number === "sg" ? "sing." : "pl."}
+                    </div>
+                {/if}
+            </div>
+        {/if}
+
+        {#if (language === "RU" || language === "ES") && block.lemma}
             <div class="text-[12px] text-zinc-300 mt-1">
                 Lemma:
                 <span class="font-semibold">{block.lemma}</span>

@@ -2,11 +2,8 @@
     import { fly, fade } from "svelte/transition";
     import { settings } from "../lib/stores";
     import {
-        ChevronDown,
-        Trash2,
-        Copy,
-        Plus,
-        ChevronsUpDown,
+        ChevronDown, Trash2, Copy,
+        Plus, ChevronsUpDown,
     } from "lucide-svelte";
     import { slide } from "svelte/transition";
 

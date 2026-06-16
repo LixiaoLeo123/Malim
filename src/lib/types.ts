@@ -12,6 +12,63 @@ export interface Block {
   gram_number?: "sg" | "pl" | null;
   tense?: string | null;
   aspect?: "pf" | "impf" | null;
+  // Spanish-specific fields:
+  mood?: "ind" | "subj" | "imp" | "cond" | null;
+  gram_person?: 1 | 2 | 3 | null;
+}
+
+export interface LanguageOption {
+  code: string;
+  name: string;
+}
+
+export const TRANSLATOR_LANGUAGES: LanguageOption[] = [
+  { code: "AR", name: "Arabic" },
+  { code: "BG", name: "Bulgarian" },
+  { code: "ZH", name: "Chinese (Simplified)" },
+  { code: "ZH-TR", name: "Chinese (Traditional)" },
+  { code: "HR", name: "Croatian" },
+  { code: "CS", name: "Czech" },
+  { code: "DA", name: "Danish" },
+  { code: "NL", name: "Dutch" },
+  { code: "EN", name: "English" },
+  { code: "ET", name: "Estonian" },
+  { code: "FI", name: "Finnish" },
+  { code: "FR", name: "French" },
+  { code: "DE", name: "German" },
+  { code: "EL", name: "Greek" },
+  { code: "HE", name: "Hebrew" },
+  { code: "HI", name: "Hindi" },
+  { code: "HU", name: "Hungarian" },
+  { code: "ID", name: "Indonesian" },
+  { code: "IT", name: "Italian" },
+  { code: "JA", name: "Japanese" },
+  { code: "KO", name: "Korean" },
+  { code: "LV", name: "Latvian" },
+  { code: "LT", name: "Lithuanian" },
+  { code: "NO", name: "Norwegian" },
+  { code: "FA", name: "Persian" },
+  { code: "PL", name: "Polish" },
+  { code: "PT", name: "Portuguese" },
+  { code: "RO", name: "Romanian" },
+  { code: "RU", name: "Russian" },
+  { code: "SR", name: "Serbian" },
+  { code: "SK", name: "Slovak" },
+  { code: "SL", name: "Slovenian" },
+  { code: "ES", name: "Spanish" },
+  { code: "SV", name: "Swedish" },
+  { code: "TH", name: "Thai" },
+  { code: "TR", name: "Turkish" },
+  { code: "UK", name: "Ukrainian" },
+  { code: "VI", name: "Vietnamese" },
+];
+
+export type ParsingLanguage = "RU" | "KR" | "ES";
+export type DictionaryLanguage = "RU" | "KR" | "ES";
+
+export function languageName(code: string): string {
+  const found = TRANSLATOR_LANGUAGES.find((l) => l.code === code);
+  return found ? found.name : code;
 }
 
 export interface Sentence {
@@ -46,6 +103,7 @@ export interface TranslatorSession {
   expanded: boolean;
   sentences: Sentence[] | null;
   createdAt: number;
+  language: string; // "RU" | "KR" | "ES" — the parsing language used
 }
 
 export interface Draft {

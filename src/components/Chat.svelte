@@ -3,11 +3,8 @@
 	import { fly, fade } from "svelte/transition";
 	import { invoke } from "@tauri-apps/api/core";
 	import {
-		currentView,
-		pushView,
-		popView,
-		settings,
-		translatorLabTransfer,
+		currentView, pushView, popView,
+		settings, translatorLabTransfer,
 		dictionarySearchQuery,
 	} from "../lib/stores";
 	import { notifications } from "$lib/notificationStore";

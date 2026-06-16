@@ -1,13 +1,9 @@
 <script lang="ts">
     import { currentView, popView } from "../lib/stores";
     import {
-        ArrowLeft,
-        ChevronDown,
-        Brain,
-        BookmarkPlus,
-        FileEdit,
-        Image as ImageIcon,
-        RotateCcw,
+        ArrowLeft, ChevronDown, Brain,
+        BookmarkPlus, FileEdit,
+        Image as ImageIcon, RotateCcw,
     } from "lucide-svelte";
     import { slide } from "svelte/transition";
     import Flag from "./Flag.svelte";

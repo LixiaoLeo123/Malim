@@ -49,6 +49,10 @@ regex = "1.12.3"
 tiktoken-rs = "0.5.8"
 ort = { version = "2.0.0-rc.12", features = ["tls-rustls"] }
 tokenizers = "0.15.2"
+llama-cpp-2 = { git = "https://github.com/utilityai/llama-cpp-rs", rev = "87fd231", features = ["vulkan"] }
+num_cpus = "1"
+encoding_rs = "0.8"
+flate2 = "1"
 anyhow = "1.0"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tauri-plugin-dialog = "2"

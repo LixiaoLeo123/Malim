@@ -8,8 +8,10 @@
 
 /src/translation/assets
 
-/src-tauri/.cargo
+/.cargo
 
-/src-tauri/gen
+/gen
 
 /src/dict/assets
+
+/resources

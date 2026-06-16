@@ -1,21 +1,12 @@
 <script lang="ts">
     import {
-        articles,
-        activeArticleId,
-        isSidebarOpen,
-        settings,
-        currentView,
-        pushView,
-        popView,
-        dictionarySearchQuery,
+        articles, activeArticleId, isSidebarOpen, settings,
+        currentView, pushView, popView,
+        dictionarySearchQuery, dictionaryLanguage,
     } from "../lib/stores";
     import {
-        Menu,
-        BookOpen,
-        Type,
-        CheckCircle2,
-        Circle,
-        Star,
+        Menu, BookOpen, Type,
+        CheckCircle2, Circle, Star,
     } from "lucide-svelte";
     import { fade, fly } from "svelte/transition";
     import Flag from "./Flag.svelte";
@@ -139,6 +130,10 @@
             "bg-gray-100 text-gray-600 active:bg-gray-200 dark:bg-gray-800/60 dark:text-gray-200 dark:active:bg-gray-700/70",
         particle:
             "bg-zinc-100 text-zinc-600 active:bg-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-200 dark:active:bg-zinc-700/70",
+        article:
+            "bg-amber-50 text-amber-700 active:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:active:bg-amber-900/55",
+        interjection:
+            "bg-pink-50 text-pink-700 active:bg-pink-100 dark:bg-pink-950/40 dark:text-pink-200 dark:active:bg-pink-900/55",
         ending: "bg-gray-100 text-gray-600 active:bg-gray-200 dark:bg-gray-800/60 dark:text-gray-200 dark:active:bg-gray-700/70",
         punctuation:
             "bg-transparent text-zinc-400 cursor-default dark:text-zinc-500",
@@ -146,20 +141,30 @@
             "bg-slate-50 text-slate-500 active:bg-slate-100 dark:bg-slate-800/50 dark:text-slate-200 dark:active:bg-slate-700/65",
     };
 
-    function getRussianNounOrPronounColor(block: Block) {
-        if (block.pos !== "noun" && block.pos !== "pronoun") return null;
-        if (block.gram_gender === "m")
-            return "bg-violet-50 text-violet-700 active:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200 dark:active:bg-violet-900/55";
-        if (block.gram_gender === "f")
-            return "bg-cyan-50 text-cyan-700 active:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-200 dark:active:bg-cyan-900/55";
-        if (block.gram_gender === "n")
-            return "bg-blue-50 text-blue-700 active:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:active:bg-blue-900/55";
-        return colorMap["noun"];
+    function getBlockPosClass(block: Block, lang?: string): string {
+        if (lang === "RU" && (block.pos === "noun" || block.pos === "pronoun")) {
+            if (block.gram_gender === "m")
+                return "bg-violet-50 text-violet-700 active:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200 dark:active:bg-violet-900/55";
+            if (block.gram_gender === "f")
+                return "bg-cyan-50 text-cyan-700 active:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-200 dark:active:bg-cyan-900/55";
+            if (block.gram_gender === "n")
+                return "bg-blue-50 text-blue-700 active:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-200 dark:active:bg-blue-900/55";
+            return colorMap.noun;
+        }
+        if (lang === "ES" && (block.pos === "noun" || block.pos === "adjective" || block.pos === "article")) {
+            if (block.gram_gender === "m")
+                return "bg-violet-50 text-violet-700 active:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-200 dark:active:bg-violet-900/55";
+            if (block.gram_gender === "f")
+                return "bg-cyan-50 text-cyan-700 active:bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-200 dark:active:bg-cyan-900/55";
+            return colorMap[block.pos] || colorMap.unknown;
+        }
+        return colorMap[block.pos] || colorMap.unknown;
     }
 
     function getLanguageName(code: string | undefined): string {
         if (code === "KR") return "Korean";
         if (code === "RU") return "Russian";
+        if (code === "ES") return "Spanish";
         return "Unknown";
     }
 
@@ -392,6 +397,10 @@
 
     function searchInDictionary(text: string) {
         clearTimeout(pressTimer);
+        // Auto-adjust dictionary language based on article language
+        if (article?.language === "KR") dictionaryLanguage.set("KR");
+        else if (article?.language === "ES") dictionaryLanguage.set("ES");
+        else dictionaryLanguage.set("RU");
         dictionarySearchQuery.set(text.trim());
         pushView("dictionary");
     }
@@ -503,14 +512,7 @@
                         >
                             {#each sentence.blocks as block}
                                 <button
-                                    class="interactive-block px-1 py-0 mx-[2px] rounded transition-transform duration-75 ease-out active:scale-95 {getLanguageName(
-                                        article?.language,
-                                    ) === 'Russian' &&
-                                    (block.pos === 'noun' ||
-                                        block.pos === 'pronoun')
-                                        ? getRussianNounOrPronounColor(block)
-                                        : colorMap[block.pos] ||
-                                          colorMap['unknown']}"
+                                    class="interactive-block px-1 py-0 mx-[2px] rounded transition-transform duration-75 ease-out active:scale-95 {getBlockPosClass(block, article?.language)}"
                                     on:click={(e) =>
                                         handleBlockClick(
                                             e,
@@ -529,6 +531,13 @@
                                             class="text-[10px] ml-[1px] text-purple-500"
                                         >
                                             {block.gram_case}
+                                        </sup>
+                                    {/if}
+                                    {#if article?.language === "ES" && block.pos === "verb" && block.mood}
+                                        <sup
+                                            class="ml-0.5 text-[9px] font-bold opacity-70"
+                                        >
+                                            {block.mood}
                                         </sup>
                                     {/if}
                                 </button>

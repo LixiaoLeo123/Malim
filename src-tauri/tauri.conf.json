@@ -44,6 +44,9 @@
       "appimage": {
         "bundleMediaFramework": true
       }
-    }
+    },
+    "resources": [
+      "resources/*"
+    ]
   }
 }

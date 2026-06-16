@@ -6,38 +6,23 @@
     import PromptGenerator from "./PromptGenerator.svelte";
     import TagEditorModal from "./TagEditorModal.svelte";
     import {
-        Globe,
-        MessageCircle,
-        Star,
-        Languages,
-        BookOpenText,
+        Globe, MessageCircle, Star,
+        Languages, BookOpenText,
     } from "lucide-svelte";
     import {
-        articles,
-        activeArticleId,
-        pushView,
-        resetToView,
-        isSidebarOpen,
-        editorDraft,
-        settings,
-        parsingQueue,
+        articles, activeArticleId,
+        pushView, resetToView,
+        isSidebarOpen, editorDraft,
+        settings, parsingQueue,
     } from "../lib/stores";
     import type { Article } from "../lib/types";
     import {
-        Plus,
-        Trash2,
-        Pencil,
-        X,
-        Sparkles,
-        RefreshCw,
-        BarChart2,
-        Settings2,
-        CheckCircle2,
-        AlertCircle,
-        ListChecks,
-        CheckSquare,
-        Tag,
-        Hash,
+        Plus, Trash2, Pencil,
+        X, Sparkles, RefreshCw,
+        BarChart2, Settings2,
+        CheckCircle2, AlertCircle,
+        ListChecks, CheckSquare,
+        Tag, Hash,
     } from "lucide-svelte";
     import ApiConfigModal from "./ApiConfigModel.svelte";
     import { invoke } from "@tauri-apps/api/core";

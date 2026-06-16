@@ -1,10 +1,7 @@
 <script lang="ts">
     import {
-        popView,
-        editorDraft,
-        articles,
-        activeArticleId,
-        settings,
+        popView, editorDraft, articles,
+        activeArticleId, settings,
         parsingQueue,
     } from "../lib/stores";
     import { ArrowLeft, Check, ChevronDown } from "lucide-svelte";
@@ -109,6 +106,8 @@
                 <span
                     >{$editorDraft.language === "KR"
                         ? "Korean"
+                        : $editorDraft.language === "ES"
+                        ? "Spanish"
                         : "Russian"}</span
                 >
                 <ChevronDown
@@ -143,6 +142,16 @@
                     >
                         <Flag code="RU" size={18} />
                         <span>Russian</span>
+                    </button>
+                    <button
+                        class="w-full text-left px-4 py-2 hover:bg-zinc-50 flex items-center space-x-3 text-sm text-zinc-700 dark:hover:bg-zinc-800 dark:text-zinc-200"
+                        on:click={() => {
+                            $editorDraft.language = "ES";
+                            showLangSelector = false;
+                        }}
+                    >
+                        <Flag code="ES" size={18} />
+                        <span>Spanish</span>
                     </button>
                 </div>
             {/if}

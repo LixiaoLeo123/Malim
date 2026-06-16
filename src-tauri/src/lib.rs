@@ -40,7 +40,7 @@ use chat::commands::{
 };
 
 mod translation;
-use translation::commands::translate;
+use translation::commands::{translate, translate_llm};
 
 mod grammar_correction;
 use grammar_correction::commands::check_grammar;
@@ -52,7 +52,7 @@ mod brain;
 mod resolver;
 mod dict;
 use brain::get_brain_words;
-use dict::{preload_russian_dictionary, search_russian_dictionary};
+use dict::{preload_korean_dictionary, preload_russian_dictionary, preload_spanish_dictionary, search_korean_dictionary, search_russian_dictionary, search_spanish_dictionary};
 
 pub fn build_prompt(
     lang: &str,
@@ -210,6 +210,58 @@ pub fn build_prompt(
             );
             prompt.push_str(&example);
         }
+        "ES" => {
+            prompt.push_str("Task: Spanish linguistic analysis.\n");
+            prompt.push_str("CORE: Analyze each word's morphology and syntax. Spanish has rich verbal inflection and gender/number agreement.\n");
+            prompt.push_str("POS: noun, verb, adjective, adverb, pronoun, preposition, conjunction, article, interjection, punctuation, unknown.\n");
+            prompt.push_str("FIELDS (if meaningful): text, pos, definition, lemma, gram_gender (m/f), gram_number (sg/pl), tense (pres/past/fut/imp/inf/gerund/participle), mood (ind/subj/imp/cond), gram_person (1/2/3).\n");
+            prompt.push_str("RULES:\n");
+            prompt.push_str("- Nouns/Adjectives: Include gender (m/f) and number (sg/pl).\n");
+            prompt.push_str("- Articles: Mark as 'article' with gender and number. Definition = 'the'/'a'/'some'.\n");
+            prompt.push_str("- Verbs: Lemma MUST be Infinitive. Include tense, mood, person. Participles = verb (tense: participle).\n");
+            prompt.push_str("- Pronouns: Include person and gender where applicable.\n");
+            prompt.push_str("- Prepositions: Include 'preposition' as pos, give English equivalent as definition.\n");
+
+            if stress_mark {
+                prompt.push_str("- Stress: Add acute accents to stressed vowels per Spanish orthography.\n");
+            }
+
+            if show_grammar_notes {
+                prompt.push_str("- Grammar Note: Explain the grammatical role concisely.\n");
+            }
+            prompt.push_str("\n");
+
+            let note_verb = if show_grammar_notes { r#", "grammar_note": "Preterite 3rd person singular."# } else { "" };
+            let note_article = if show_grammar_notes { r#", "grammar_note": "Feminine singular definite article."# } else { "" };
+            let note_noun = if show_grammar_notes { r#", "grammar_note": "Feminine singular noun, subject."# } else { "" };
+            let note_prep = if show_grammar_notes { r#", "grammar_note": "Preposition indicating direction."# } else { "" };
+            let note_noun2 = if show_grammar_notes { r#", "grammar_note": "Feminine singular noun, object of preposition."# } else { "" };
+            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+
+            let example = format!(
+                r#"Example Output:
+{{
+  "translation": "The woman walked to the library.",
+  "blocks": [
+    {{ "text": "La", "pos": "article", "definition": "the", "lemma": "el", "gram_gender": "f", "gram_number": "sg"{note_article} }},
+    {{ "text": "mujer", "pos": "noun", "definition": "woman", "lemma": "mujer", "gram_gender": "f", "gram_number": "sg"{note_noun} }},
+    {{ "text": "caminó", "pos": "verb", "definition": "walked", "lemma": "caminar", "tense": "past", "mood": "ind", "gram_person": 3, "gram_number": "sg"{note_verb} }},
+    {{ "text": "a", "pos": "preposition", "definition": "to", "lemma": "a"{note_prep} }},
+    {{ "text": "la", "pos": "article", "definition": "the", "lemma": "el", "gram_gender": "f", "gram_number": "sg" }},
+    {{ "text": "biblioteca", "pos": "noun", "definition": "library", "lemma": "biblioteca", "gram_gender": "f", "gram_number": "sg"{note_noun2} }},
+    {{ "text": ".", "pos": "punctuation", "definition": "."{note_punct} }}
+  ]
+}}
+"#,
+                note_verb = note_verb,
+                note_article = note_article,
+                note_noun = note_noun,
+                note_prep = note_prep,
+                note_noun2 = note_noun2,
+                note_punct = note_punct
+            );
+            prompt.push_str(&example);
+        }
         _ => {
             prompt.push_str(
                 "Task: Sentence analysis (translation, tokenization, POS, definitions).\n",
@@ -222,6 +274,46 @@ pub fn build_prompt(
     prompt
 }
 
+fn deserialize_optional_u8<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct OptionalU8Visitor;
+    impl<'de> serde::de::Visitor<'de> for OptionalU8Visitor {
+        type Value = Option<u8>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("an integer, null, or empty string")
+        }
+
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(Some(v as u8))
+        }
+
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(Some(v as u8))
+        }
+
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            if v.is_empty() {
+                Ok(None)
+            } else {
+                v.parse::<u8>().map(Some).map_err(serde::de::Error::custom)
+            }
+        }
+    }
+
+    deserializer.deserialize_any(OptionalU8Visitor)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WordBlock {
     text: String,
@@ -232,11 +324,17 @@ pub struct WordBlock {
     audio_path: Option<String>,
     // Russian-specific fields:
     lemma: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_u8")]
     gram_case: Option<u8>,       // 1-7
     gram_gender: Option<String>, // m / f / n
     gram_number: Option<String>, // sg / pl
     tense: Option<String>,       // pres / past / fut / imp / inf / gerund / ...
     aspect: Option<String>,      // impf / pf
+    // Spanish-specific fields:
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mood: Option<String>,        // ind / subj / imp / cond
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_optional_u8")]
+    gram_person: Option<u8>,     // 1 / 2 / 3
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -562,6 +660,54 @@ fn build_batch_prompt(
             );
             prompt.push_str(&example);
         }
+        "ES" => {
+            prompt.push_str("Task: Spanish linguistic analysis.\n");
+            prompt.push_str("CORE: Analyze each word's morphology and syntax.\n");
+            prompt.push_str("POS: noun, verb, adjective, adverb, pronoun, preposition, conjunction, article, interjection, punctuation, unknown.\n");
+            prompt.push_str("FIELDS (if meaningful): text, pos, definition, lemma, gram_gender (m/f), gram_number (sg/pl), tense (pres/past/fut/imp/inf/gerund/participle), mood (ind/subj/imp/cond), gram_person (1/2/3).\n");
+            prompt.push_str("RULES:\n");
+            prompt.push_str("- Nouns/Adjectives: Include gender and number.\n");
+            prompt.push_str("- Articles: Mark as 'article' with gender and number.\n");
+            prompt.push_str("- Verbs: Lemma MUST be Infinitive. Include tense, mood, person.\n");
+            prompt.push_str("\n");
+
+            let note_verb = if show_grammar_notes { r#", "grammar_note": "Preterite 3rd person singular."# } else { "" };
+            let note_article = if show_grammar_notes { r#", "grammar_note": "Feminine singular definite article."# } else { "" };
+            let note_noun = if show_grammar_notes { r#", "grammar_note": "Feminine singular noun, subject."# } else { "" };
+            let note_prep = if show_grammar_notes { r#", "grammar_note": "Preposition indicating direction."# } else { "" };
+            let note_noun2 = if show_grammar_notes { r#", "grammar_note": "Feminine singular noun, object of preposition."# } else { "" };
+            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+
+            let example = format!(
+                r#"Example Output:
+{{
+  "items": [
+    {{
+      "index": 0,
+      "translation": "The woman walked to the library.",
+      "blocks": [
+        {{ "text": "La", "pos": "article", "definition": "the", "lemma": "el", "gram_gender": "f", "gram_number": "sg"{note_article} }},
+        {{ "text": "mujer", "pos": "noun", "definition": "woman", "lemma": "mujer", "gram_gender": "f", "gram_number": "sg"{note_noun} }},
+        {{ "text": "caminó", "pos": "verb", "definition": "walked", "lemma": "caminar", "tense": "past", "mood": "ind", "gram_person": 3, "gram_number": "sg"{note_verb} }},
+        {{ "text": "a", "pos": "preposition", "definition": "to", "lemma": "a"{note_prep} }},
+        {{ "text": "la", "pos": "article", "definition": "the", "lemma": "el", "gram_gender": "f", "gram_number": "sg" }},
+        {{ "text": "biblioteca", "pos": "noun", "definition": "library", "lemma": "biblioteca", "gram_gender": "f", "gram_number": "sg"{note_noun2} }},
+        {{ "text": ".", "pos": "punctuation", "definition": "."{note_punct} }}
+      ]
+    }}
+  ]
+}}
+
+"#,
+                note_verb = note_verb,
+                note_article = note_article,
+                note_noun = note_noun,
+                note_prep = note_prep,
+                note_noun2 = note_noun2,
+                note_punct = note_punct
+            );
+            prompt.push_str(&example);
+        }
         _ => {
             prompt.push_str("Task: Sentence analysis (translation, tokenization, POS, definitions).\n\n");
             prompt.push_str(
@@ -866,11 +1012,13 @@ fn pick_voice(lang: &str, tts_api: &str) -> &'static str {
         "qwen3-tts" => match lang {
             "KR" => "Sohee",
             "RU" => "Alek",
+            "ES" => "Sonrisa",
             _ => "en-US-JennyNeural",
         },
         "edge-tts" => match lang {
             "KR" => "ko-KR-SunHiNeural",
             "RU" => "ru-RU-SvetlanaNeural",
+            "ES" => "es-ES-ElviraNeural",
             _ => "en-US-JennyNeural",
         },
         "silero-tts" => "baya",
@@ -1408,6 +1556,8 @@ async fn build_sentence_result(
                 gram_number: None,
                 tense: None,
                 aspect: None,
+                mood: None,
+                gram_person: None,
             }],
             raw.clone(),
         ),
@@ -1426,6 +1576,8 @@ async fn build_sentence_result(
                 gram_number: None,
                 tense: None,
                 aspect: None,
+                mood: None,
+                gram_person: None,
             }],
             "Translation unavailable due to error.".to_string(),
         ),
@@ -2047,6 +2199,11 @@ async fn sync_memory(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Workaround for Adreno Vulkan GPU bugs:
+    // Force FP32 arithmetic to avoid garbled/repeated token output with Q4_0 models.
+    // Must be set before any llama.cpp Vulkan backend initialization.
+    std::env::set_var("GGML_VK_DISABLE_F16", "1");
+
     tauri::Builder::default()
         // .manage(AppState {
         //     http_client: reqwest::Client::builder()
@@ -2078,15 +2235,6 @@ pub fn run() {
                 emitted_urls: std::sync::Mutex::new(std::collections::HashSet::new()),
                 memory_handler: handler,
                 chat_lock: tokio::sync::Mutex::new(()),
-                translator: {
-                    match translation::Translator::new() {
-                        Ok(t) => Some(std::sync::Mutex::new(t)),
-                        Err(e) => {
-                            dbg!("Failed to initialize translator: {}", e);
-                            None
-                        }
-                    }
-                },
             });
 
             Ok(())
@@ -2117,6 +2265,7 @@ pub fn run() {
             send_message,
             trigger_proactive,
             translate,
+            translate_llm,
             accentize_text,
             check_grammar,
             get_chat_logs,
@@ -2128,6 +2277,10 @@ pub fn run() {
             get_brain_words,
             preload_russian_dictionary,
             search_russian_dictionary,
+            preload_korean_dictionary,
+            search_korean_dictionary,
+            preload_spanish_dictionary,
+            search_spanish_dictionary,
             update_chat_parsed
         ])
         .run(tauri::generate_context!())

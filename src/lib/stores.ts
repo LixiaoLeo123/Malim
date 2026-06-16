@@ -1,5 +1,5 @@
 import { derived, writable } from 'svelte/store';
-import type { Article, DictionaryHistoryEntry, Draft, Settings, TranslatorSession } from './types';
+import type { Article, DictionaryHistoryEntry, DictionaryLanguage, Draft, LanguageOption, Settings, TranslatorSession } from './types';
 import { invoke } from '@tauri-apps/api/core'
 import { get } from 'svelte/store'
 
@@ -60,6 +60,10 @@ export const translatorLabTransfer = writable<TranslatorLabTransfer | null>(null
 
 export const dictionaryHistory = writable<DictionaryHistoryEntry[]>([]);
 export const dictionarySearchQuery = writable<string | null>(null);
+export const dictionaryLanguage = writable<DictionaryLanguage>("RU");
+
+export const translatorSourceLang = writable<string>("AUTO");
+export const translatorTargetLang = writable<string>("RU");
 
 export const editorDraft = writable<Draft>({
   title: '',
@@ -211,5 +215,7 @@ async function save() {
 
   if (get(settings).preloadDict) {
     invoke('preload_russian_dictionary').catch(console.error);
+    invoke('preload_korean_dictionary').catch(console.error);
+    invoke('preload_spanish_dictionary').catch(console.error);
   }
 })();

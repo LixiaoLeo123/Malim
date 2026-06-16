@@ -1,156 +1,184 @@
 pub mod commands;
 
 use anyhow::{anyhow, Result};
-use ort::session::builder::GraphOptimizationLevel;
-use ort::session::Session;
-use ort::value::Value;
-use tokenizers::Tokenizer;
+use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::llama_backend::LlamaBackend;
+use llama_cpp_2::llama_batch::LlamaBatch;
+use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaModel};
+use llama_cpp_2::sampling::LlamaSampler;
+use std::num::NonZeroU32;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
-static ENCODER_BYTES: &[u8] = include_bytes!("assets/encoder_model_quantized.onnx");
-static DECODER_BYTES: &[u8] = include_bytes!("assets/decoder_model_quantized.onnx");
-static TOKENIZER_BYTES: &[u8] = include_bytes!("assets/tokenizer.json");
+const MODEL_FILENAME: &str = "Hy-MT2-1.8B-Q4_0.gguf";
+
+static INSTANCE: OnceLock<Arc<Mutex<Translator>>> = OnceLock::new();
+
+/// Lazy-init on first translation request.
+pub fn get_translator(app_data: &PathBuf) -> Result<Arc<Mutex<Translator>>> {
+    if let Some(t) = INSTANCE.get() {
+        return Ok(Arc::clone(t));
+    }
+    let model_path = ensure_model(app_data)?;
+    let translator = Translator::load(&model_path)?;
+    let arc = Arc::new(Mutex::new(translator));
+    let stored = INSTANCE.get_or_init(|| arc);
+    Ok(Arc::clone(stored))
+}
+
+fn ensure_model(app_data: &PathBuf) -> Result<PathBuf> {
+    let models_dir = app_data.join("models");
+    std::fs::create_dir_all(&models_dir)?;
+    let model_path = models_dir.join(MODEL_FILENAME);
+    if !model_path.exists() {
+        return Err(anyhow!(
+            "Model file not found at {}. Call ensure_model_bytes first.",
+            model_path.display()
+        ));
+    }
+    Ok(model_path)
+}
 
 pub struct Translator {
-    encoder: Session,
-    decoder: Session,
-    tokenizer: Tokenizer,
+    model: LlamaModel,
+    backend: LlamaBackend,
 }
 
 impl Translator {
-    pub fn new() -> Result<Self> {
-        let encoder = Session::builder()
-            .map_err(|e| anyhow!("Builder error: {}", e))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| anyhow!("Opt error: {}", e))?
-            .with_intra_threads(4)
-            .map_err(|e| anyhow!("Thread error: {}", e))?
-            .commit_from_memory(ENCODER_BYTES)
-            .map_err(|e| anyhow!("Encoder load error: {}", e))?;
+    fn load(model_path: &PathBuf) -> Result<Self> {
+        // Workaround for Adreno Vulkan GPU bugs:
+        // Setting GGML_VK_DISABLE_F16=1 forces the Vulkan backend to use FP32
+        // arithmetic instead of FP16. On Adreno GPUs, FP16 can produce garbled
+        // / repeated token output with Q4_0 models. This env var must be set
+        // before LlamaBackend::init() to take effect.
+        std::env::set_var("GGML_VK_DISABLE_F16", "1");
 
-        let decoder = Session::builder()
-            .map_err(|e| anyhow!("Builder error: {}", e))?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(|e| anyhow!("Opt error: {}", e))?
-            .with_intra_threads(4)
-            .map_err(|e| anyhow!("Thread error: {}", e))?
-            .commit_from_memory(DECODER_BYTES)
-            .map_err(|e| anyhow!("Decoder load error: {}", e))?;
+        let backend = LlamaBackend::init()
+            .map_err(|e| anyhow!("llama backend init: {}", e))?;
+        let path_str = model_path.to_str()
+            .ok_or_else(|| anyhow!("non-utf8 model path"))?;
+        let model = LlamaModel::load_from_file(&backend, path_str, &LlamaModelParams::default())
+            .map_err(|e| anyhow!("Failed to load translation model: {}", e))?;
 
-        let tokenizer = Tokenizer::from_bytes(TOKENIZER_BYTES)
-            .map_err(|e| anyhow!("Tokenizer error: {}", e))?;
-
-        Ok(Self {
-            encoder,
-            decoder,
-            tokenizer,
-        })
-    }
-
-    pub fn translate(&mut self, text: &str) -> Result<String> {
-        let encoding = self
-            .tokenizer
-            .encode(text, true)
-            .map_err(|e| anyhow!("Encode error: {}", e))?;
-
-        let mut input_ids: Vec<i64> = encoding.get_ids().iter().map(|&x| x as i64).collect();
-
-        input_ids.push(0);
-
-        let attention_mask: Vec<i64> = vec![1; input_ids.len()];
-        let seq_len = input_ids.len();
-
-        let input_shape = vec![1, seq_len];
-        let input_ids_val = Value::from_array((input_shape.clone(), input_ids.clone()))
-            .map_err(|e| anyhow!("Value error: {}", e))?
-            .into_dyn();
-        let attention_mask_val = Value::from_array((input_shape.clone(), attention_mask.clone()))
-            .map_err(|e| anyhow!("Value error: {}", e))?
-            .into_dyn();
-
-        let encoder_inputs = vec![
-            ("input_ids", input_ids_val),
-            ("attention_mask", attention_mask_val),
-        ];
-
-        let encoder_outputs = self
-            .encoder
-            .run(encoder_inputs)
-            .map_err(|e| anyhow!("Encoder run error: {}", e))?;
-
-        let hidden_val = encoder_outputs
-            .get("last_hidden_state")
-            .ok_or_else(|| anyhow!("Missing hidden state"))?;
-
-        let (_, hidden_data) = hidden_val.try_extract_tensor::<f32>()?;
-        let hidden_vec: Vec<f32> = hidden_data.to_vec();
-        let hidden_dim = hidden_data.len() / seq_len;
-
-        let mut generated_ids = vec![62517i64];
-        let mut result_text = String::new();
-        let eos_token_id = 0u32; // </s>
-
-        for _step in 0..128 {
-            let cur_len = generated_ids.len();
-            let dec_shape = vec![1, cur_len];
-            let dec_val = Value::from_array((dec_shape, generated_ids.clone()))
-                .map_err(|e| anyhow!("Dec value error: {}", e))?
-                .into_dyn();
-
-            let enc_shape = vec![1, seq_len, hidden_dim];
-            let enc_val = Value::from_array((enc_shape, hidden_vec.clone()))
-                .map_err(|e| anyhow!("Enc value error: {}", e))?
-                .into_dyn();
-
-            let enc_mask_val = Value::from_array((input_shape.clone(), attention_mask.clone()))
-                .map_err(|e| anyhow!("Mask value error: {}", e))?
-                .into_dyn();
-
-            let decoder_inputs = vec![
-                ("input_ids", dec_val),
-                ("encoder_hidden_states", enc_val),
-                ("encoder_attention_mask", enc_mask_val),
-            ];
-
-            let decoder_outputs = self
-                .decoder
-                .run(decoder_inputs)
-                .map_err(|e| anyhow!("Decoder run error: {}", e))?;
-
-            let logits_val = decoder_outputs
-                .get("logits")
-                .ok_or_else(|| anyhow!("Missing logits"));
-
-            let (_, logits_data) = logits_val?.try_extract_tensor::<f32>()?;
-
-            let vocab_size = logits_data.len() / cur_len;
-            let start_idx = (cur_len - 1) * vocab_size;
-
-            let mut max_idx = 0;
-            let mut max_val = logits_data[start_idx];
-            for i in 1..vocab_size {
-                let idx = start_idx + i;
-                if idx < logits_data.len() && logits_data[idx] > max_val {
-                    max_val = logits_data[idx];
-                    max_idx = i;
-                }
-            }
-
-            let next_token_id = max_idx as u32;
-
-            if next_token_id == eos_token_id {
-                break;
-            }
-
-            let token = self
-                .tokenizer
-                .id_to_token(next_token_id)
-                .unwrap_or_default();
-            let token = token.replace('▁', " ");
-
-            result_text.push_str(&token);
-            generated_ids.push(next_token_id as i64);
+        // Run a minimal warmup decode to pre-compile Vulkan compute shaders.
+        // On Adreno GPUs, the first pipeline creation (especially
+        // mul_mat_vec_q4_0_f32_f32) can take >20s of synchronous compilation.
+        // Paying that cost here during load prevents a long hang on the first
+        // user translation.
+        if let Err(e) = Self::warmup_vulkan_pipelines(&model, &backend) {
+            eprintln!("[translation] Vulkan warmup failed (non-fatal): {}", e);
         }
 
-        Ok(result_text.trim().to_string())
+        Ok(Self { model, backend })
+    }
+
+    /// Trigger Vulkan pipeline compilation by running a trivial decode.
+    /// This is discarded immediately — its only purpose is to force lazy
+    /// shader compilation before the user asks for a real translation.
+    fn warmup_vulkan_pipelines(model: &LlamaModel, backend: &LlamaBackend) -> Result<()> {
+        let n_threads = num_cpus::get_physical() as i32;
+        let mut ctx = model.new_context(
+            backend,
+            LlamaContextParams::default()
+                .with_n_ctx(NonZeroU32::new(32))
+                .with_n_threads(n_threads)
+                .with_n_threads_batch(n_threads),
+        )?;
+
+        let warmup_text = "Hello";
+        let tokens = model.str_to_token(warmup_text, AddBos::Never)?;
+        let mut batch = LlamaBatch::new(tokens.len() + 1, 1);
+        batch.add_sequence(&tokens, 0, false)?;
+        ctx.decode(&mut batch)?;
+
+        let mut sampler = LlamaSampler::chain_simple([LlamaSampler::greedy()]);
+        let token = sampler.sample(&ctx, -1);
+        sampler.accept(token);
+        if !model.is_eog_token(token) {
+            batch.clear();
+            batch.add(token, tokens.len() as i32, &[0], true)?;
+            ctx.decode(&mut batch)?;
+        }
+
+        drop(ctx);
+        Ok(())
+    }
+
+    pub fn translate(
+        &self,
+        text: &str,
+        source_lang: &str,
+        target_lang: &str,
+    ) -> Result<String> {
+        let source_name = language_name(source_lang);
+        let target_name = language_name(target_lang);
+
+        let n_threads = num_cpus::get_physical() as i32;
+        let mut ctx = self.model.new_context(
+            &self.backend,
+            LlamaContextParams::default()
+                .with_n_ctx(NonZeroU32::new(512))
+                .with_n_threads(n_threads)
+                .with_n_threads_batch(n_threads)
+                .with_n_batch(256)
+                .with_n_ubatch(8),
+        )?;
+
+        let tmpl = self.model.chat_template(None)?;
+
+        let system = if source_lang == "AUTO" {
+            format!("You are a translator. Translate the user's message to {}. Output ONLY the translation, no additional text.", target_name)
+        } else {
+            format!("You are a translator. Translate the user's message from {} to {}. Output ONLY the translation, no additional text.", source_name, target_name)
+        };
+
+        let messages = [
+            LlamaChatMessage::new("system".to_string(), system)?,
+            LlamaChatMessage::new("user".to_string(), text.to_string())?,
+        ];
+        let prompt = self.model.apply_chat_template(&tmpl, &messages, true)?;
+
+        let tokens = self.model.str_to_token(&prompt, AddBos::Never)?;
+        let n_prompt = tokens.len();
+        let mut batch = LlamaBatch::new(n_prompt + 256, 1);
+        batch.add_sequence(&tokens, 0, false)?;
+        ctx.decode(&mut batch)?;
+
+        let mut sampler = LlamaSampler::chain_simple([LlamaSampler::greedy()]);
+        let mut generated: Vec<llama_cpp_2::token::LlamaToken> = Vec::new();
+
+        for _ in 0..256 {
+            let token = sampler.sample(&ctx, -1);
+            sampler.accept(token);
+            if self.model.is_eog_token(token) { break; }
+            batch.clear();
+            batch.add(token, (n_prompt + generated.len()) as i32, &[0], true)?;
+            ctx.decode(&mut batch)?;
+            generated.push(token);
+        }
+
+        let mut translation = String::new();
+        let mut decoder = encoding_rs::UTF_8.new_decoder();
+        for token in &generated {
+            translation.push_str(&self.model.token_to_piece(*token, &mut decoder, false, None)?);
+        }
+        Ok(translation.trim().to_string())
+    }
+}
+
+pub fn language_name(code: &str) -> &str {
+    match code {
+        "AR" => "Arabic", "BG" => "Bulgarian", "ZH" => "Chinese (Simplified)",
+        "ZH-TR" => "Chinese (Traditional)", "HR" => "Croatian", "CS" => "Czech",
+        "DA" => "Danish", "NL" => "Dutch", "EN" => "English", "ET" => "Estonian",
+        "FI" => "Finnish", "FR" => "French", "DE" => "German", "EL" => "Greek",
+        "HE" => "Hebrew", "HI" => "Hindi", "HU" => "Hungarian", "ID" => "Indonesian",
+        "IT" => "Italian", "JA" => "Japanese", "KO" => "Korean", "LV" => "Latvian",
+        "LT" => "Lithuanian", "NO" => "Norwegian", "FA" => "Persian", "PL" => "Polish",
+        "PT" => "Portuguese", "RO" => "Romanian", "RU" => "Russian", "SR" => "Serbian",
+        "SK" => "Slovak", "SL" => "Slovenian", "ES" => "Spanish", "SV" => "Swedish",
+        "TH" => "Thai", "TR" => "Turkish", "UK" => "Ukrainian", "VI" => "Vietnamese",
+        _ => code,
     }
 }
