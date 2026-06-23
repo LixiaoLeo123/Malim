@@ -512,7 +512,7 @@
                         >
                             {#each sentence.blocks as block}
                                 <button
-                                    class="interactive-block px-1 py-0 mx-[2px] rounded transition-transform duration-75 ease-out active:scale-95 {getBlockPosClass(block, article?.language)}"
+                                    class="interactive-block px-1 py-0 mx-[2px] rounded transition-transform duration-75 ease-out active:scale-95 {getBlockPosClass(block, article?.language)} {activeBlock === block ? 'ring-2 ring-[#660874] dark:ring-[#9a2eb0]' : ''}"
                                     on:click={(e) =>
                                         handleBlockClick(
                                             e,

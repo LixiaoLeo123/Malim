@@ -1192,7 +1192,7 @@
 															class="word-block {getBlockPosClass(
 																block,
 																msg.detectedLang,
-															)}"
+															)} {activeParsedBlock === block ? 'active' : ''}"
 															on:click|stopPropagation={(
 																e,
 															) =>
@@ -2003,6 +2003,10 @@
 		transform: scale(0.93);
 	}
 
+	.word-block.active {
+		box-shadow: 0 0 0 2px #660874;
+	}
+
 	.case-sup {
 		font-size: 9px;
 		margin-left: 1px;
@@ -2108,6 +2112,10 @@
 		.ru-gender-n {
 			background-color: rgba(59, 130, 246, 0.22);
 			color: #93c5fd;
+		}
+
+		.word-block.active {
+			box-shadow: 0 0 0 2px #9a2eb0;
 		}
 	}
 

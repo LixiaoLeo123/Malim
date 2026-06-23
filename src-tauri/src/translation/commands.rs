@@ -8,14 +8,7 @@ fn get_app_data(app: &AppHandle) -> std::path::PathBuf {
     app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
-/// Ensure the model file exists in app_data_dir/models/, reading it from the bundled
-/// Tauri resources on first run. Uses tauri-plugin-fs which handles the asset://
-/// protocol on Android.
-///
-/// On Android, resource_dir() returns `asset://localhost/` and the model is at
-/// `assets/resources/` inside the APK, so the full path is `asset://localhost/resources/<file>`.
-/// On desktop, resource_dir() points to the install dir where files from
-/// `resources/*` are placed directly, so just `<file>` suffices.
+
 fn ensure_model(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let app_data = get_app_data(app);
     let target_dir = app_data.join("models");
@@ -27,10 +20,24 @@ fn ensure_model(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 
     let resource_dir = app.path().resource_dir().map_err(|e| format!("resource_dir(): {}", e))?;
 
-    #[cfg(target_os = "android")]
+
     let resource_model = resource_dir.join("resources").join(MODEL_FILENAME);
+
+
     #[cfg(not(target_os = "android"))]
-    let resource_model = resource_dir.join(MODEL_FILENAME);
+    let resource_model = if resource_model.exists() {
+        resource_model
+    } else {
+        let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join(MODEL_FILENAME);
+        eprintln!(
+            "[translation] model not at {}, trying fallback: {}",
+            resource_model.display(),
+            fallback.display()
+        );
+        fallback
+    };
 
     let rm = resource_model.display().to_string();
     eprintln!("[translation] reading model from: {}", rm);

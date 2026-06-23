@@ -372,7 +372,7 @@
 			<section class="flex flex-col gap-4 xl:grid xl:min-h-0 xl:grid-rows-[minmax(0,1fr)_minmax(0,1fr)]">
 
 				<!-- Source Panel -->
-				<div class="flex flex-col overflow-hidden rounded-[20px] border border-zinc-200/70 bg-white shadow-sm dark:border-zinc-800/80 dark:bg-zinc-900 md:rounded-[24px]">
+				<div class="flex flex-col overflow-visible rounded-[20px] border border-zinc-200/70 bg-white shadow-sm dark:border-zinc-800/80 dark:bg-zinc-900 md:rounded-[24px]">
 					<div class="flex items-center justify-between border-b border-zinc-100 px-3 py-2.5 dark:border-zinc-800 md:px-5 md:py-4">
 						<div class="flex items-center gap-3">
 							<div>
@@ -457,7 +457,7 @@
 				</div>
 
 				<!-- Target Panel -->
-				<div class="flex flex-col overflow-hidden rounded-[20px] border border-zinc-200/70 bg-white shadow-sm dark:border-zinc-800/80 dark:bg-zinc-900 md:rounded-[24px]">
+				<div class="flex flex-col overflow-visible rounded-[20px] border border-zinc-200/70 bg-white shadow-sm dark:border-zinc-800/80 dark:bg-zinc-900 md:rounded-[24px]">
 					<div class="flex items-center justify-between border-b border-zinc-100 px-3 py-2.5 dark:border-zinc-800 md:px-5 md:py-4">
 						<div class="flex items-center gap-3">
 							<div>
@@ -623,7 +623,7 @@
 																		{#if block.pos === "punctuation"}
 																			<span class="analysis-block {getBlockPosClass(block, job.language)}">{block.text}</span>
 																		{:else}
-																			<button class="analysis-block rounded-md px-1 py-0.5 transition-transform duration-75 ease-out active:scale-95 {getBlockPosClass(block, job.language)}"
+																			<button class="analysis-block rounded-md px-1 py-0.5 transition-transform duration-75 ease-out active:scale-95 {getBlockPosClass(block, job.language)} {activeBlock === block ? 'ring-2 ring-[#660874] dark:ring-[#9a2eb0]' : ''}"
 																				on:click|stopPropagation={(e) => handleBlockClick(e, block, sentence, job.language)}
 																				on:contextmenu|preventDefault={(e) => searchInDictionary(block.lemma || block.text)}
 																				on:pointerdown={(e) => onPointerDown(e, block.lemma || block.text)}
