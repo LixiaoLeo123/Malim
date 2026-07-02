@@ -8,9 +8,14 @@ node_modules
 !.env.example
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
-count.py
 __pycache__
-.vscodesrc-tauri/.cargo
+.vscode/settings.json
+src-tauri/.cargo/
+src-tauri/gen/android/buildSrc/.kotlin/
+reader_temp.txt
+tmp.txt
+sync_server.rs
 DOCS.md
 latestlog_0615
 /scripts
+count.py
