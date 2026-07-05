@@ -262,16 +262,18 @@
         </div>
     </div>
 
-    <div class="flex-1 flex flex-col overflow-y-auto">
+    <div class="flex-1 flex flex-col overflow-hidden">
         <textarea
-            class="w-full min-h-[200px] p-6 text-lg resize-none outline-none text-zinc-800 placeholder:text-zinc-300 leading-relaxed dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:bg-transparent"
+            class="flex-1 w-full p-6 text-lg resize-none outline-none text-zinc-800 placeholder:text-zinc-300 leading-relaxed dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:bg-transparent"
             placeholder="Paste your text here... (you can also paste images)"
             bind:value={$editorDraft.content}
             on:paste={handlePaste}
         ></textarea>
+    </div>
 
-        {#if ($editorDraft.images || []).length > 0}
-            <div class="px-6 pb-4 space-y-3">
+    {#if ($editorDraft.images || []).length > 0}
+        <div class="border-t border-zinc-100 dark:border-zinc-800">
+            <div class="px-6 py-3 space-y-3">
                 <div class="text-xs font-medium text-zinc-400 uppercase tracking-wider">Attached Images</div>
                 <div class="flex flex-wrap gap-3">
                     {#each ($editorDraft.images || []) as img (img.id)}
@@ -294,8 +296,8 @@
                     {/each}
                 </div>
             </div>
-        {/if}
-    </div>
+        </div>
+    {/if}
 
     <div
         class="p-4 border-t border-zinc-100 flex justify-between items-center bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90"

@@ -5,7 +5,7 @@
 	import { invoke } from "@tauri-apps/api/core";
 	import { v4 as uuidv4 } from "uuid";
 	import {
-		ArrowLeft, ArrowLeftRight, Check, ChevronDown, Languages,
+		ArrowLeft, ArrowLeftRight, Check, ChevronDown, ClipboardPaste, Languages,
 		LoaderCircle, Search, Sparkles, Trash2, X
 	} from "lucide-svelte";
 	import {
@@ -291,6 +291,16 @@
 		if (stop) stopAudio();
 	}
 
+	async function clearAndPaste() {
+		try {
+			const text = await navigator.clipboard.readText();
+			sourceText = text;
+			notifications.success("Text pasted from clipboard");
+		} catch (e: any) {
+			notifications.error(e.message);
+		}
+	}
+
 	let pressTimer: number;
 	function searchInDictionary(text: string) {
 		clearTimeout(pressTimer);
@@ -430,7 +440,7 @@
 						placeholder={$translatorSourceLang === "AUTO" ? "Write or paste text in any language..." : `Write or paste ${sourceLangLabel} text here...`}
 					></textarea>
 					<div class="flex items-center border-t border-zinc-100 p-2 dark:border-zinc-800 md:px-5 md:py-3 box-border">
-						<div class="hidden md:flex items-center gap-2">
+						<div class="hidden md:flex items-center gap-1.5">
 							<button
 								on:click={swapLanguages}
 								disabled={$translatorSourceLang === "AUTO"}
@@ -439,7 +449,22 @@
 							>
 								<ArrowLeftRight size={15} />
 							</button>
+							<button
+								on:click={clearAndPaste}
+								class="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-[12px] font-semibold text-zinc-600 shadow-sm transition-all active:scale-95 hover:bg-zinc-50 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:border-zinc-600"
+								title="Clear text and paste from clipboard"
+							>
+								<ClipboardPaste size={15} />
+								<span>Clear &amp; Paste</span>
+							</button>
 						</div>
+						<button
+							on:click={clearAndPaste}
+							class="md:hidden inline-flex items-center justify-center rounded-xl border border-zinc-200 bg-white p-2 text-zinc-500 transition active:scale-95 hover:bg-zinc-50 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:border-zinc-600"
+							title="Clear text and paste from clipboard"
+						>
+							<ClipboardPaste size={16} />
+						</button>
 						<button
 							on:click={translateText}
 							disabled={isTranslating || !sourceText.trim()}
