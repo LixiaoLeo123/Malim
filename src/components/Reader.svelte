@@ -500,8 +500,35 @@
         on:scroll={containerScroll}
         class="flex-1 overflow-y-auto p-6 md:p-10 leading-loose text-lg md:text-xl font-medium text-zinc-800 dark:text-zinc-200 pb-[35vh]"
     >
-        {#if article && article.sentences && sections.length > 0}
-            {#each sections as section, sectionIdx}
+        {#if article}
+            {#if article.imageParticles && article.imageParticles.length > 0}
+                <div class="mb-6 p-4 bg-amber-50/60 border border-amber-200/60 rounded-xl dark:bg-amber-950/20 dark:border-amber-800/30">
+                    <div class="text-xs font-semibold text-amber-600 uppercase tracking-wider mb-3 dark:text-amber-400">
+                        <span class="inline-flex items-center gap-1">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                <circle cx="8.5" cy="8.5" r="1.5"/>
+                                <polyline points="21 15 16 10 5 21"/>
+                            </svg>
+                            Article Images
+                        </span>
+                    </div>
+                    <div class="flex flex-wrap gap-3">
+                        {#each article.imageParticles as ip}
+                            <div class="shrink-0">
+                                <img
+                                    src={ip.dataUrl}
+                                    alt={ip.fileName || 'Image'}
+                                    class="w-48 object-cover rounded-lg border border-amber-200 dark:border-amber-700 shadow-sm"
+                                    style="max-height: 300px;"
+                                />
+                            </div>
+                        {/each}
+                    </div>
+                </div>
+            {/if}
+            {#if article.sentences && sections.length > 0}
+                {#each sections as section, sectionIdx}
                 <div class="relative group/section">
                     {#each section as sentence}
                         <div
@@ -586,6 +613,12 @@
                     </div>
                 </div>
             {/each}
+            {/if}
+            {#if (!article.sentences || sections.length === 0) && (!article.imageParticles || article.imageParticles.length === 0)}
+                <div class="text-zinc-400 text-center mt-20 dark:text-zinc-500">
+                    No content loaded.
+                </div>
+            {/if}
         {:else}
             <div class="text-zinc-400 text-center mt-20 dark:text-zinc-500">
                 No content loaded.

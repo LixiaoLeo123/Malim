@@ -71,12 +71,29 @@ export function languageName(code: string): string {
   return found ? found.name : code;
 }
 
+export interface ImageAttachment {
+  id: string;
+  dataUrl: string;
+  mimeType: string;
+  fileName: string;
+  extractedText: string;
+  ocrStatus: 'pending' | 'processing' | 'done' | 'error';
+}
+
 export interface Sentence {
   id: string;
   original: string;
   blocks: Block[];
   translation: string;
   audio_path?: string | null;
+}
+
+export interface ImageParticle {
+  dataUrl?: string;
+  attachmentId: string;
+  extractedText: string;
+  index: number;
+  fileName?: string;
 }
 
 export interface Article {
@@ -86,6 +103,7 @@ export interface Article {
   status: 'parsing' | 'done' | 'error';
   parsingProgress: number;
   sentences: Sentence[];
+  imageParticles: ImageParticle[];
   draftContent?: string;
   language: string;
   readProgress: number;
@@ -110,6 +128,7 @@ export interface Draft {
   title: string;
   content: string;
   language: string;
+  images: ImageAttachment[];
 }
 
 export interface AiConfig {
@@ -175,6 +194,7 @@ export interface Settings {
   shadowAiConfigId: string; // Shadow AI (Memory)
   embedAiConfigId: string; // Embedding Model (RAG)
   grammarAiConfigId: string; // Grammar Correction AI
+  ocrAiConfigId: string; // Image Recognition
   concurrency: number;
   criticalValue: number;
   showGrammarNotes: boolean;

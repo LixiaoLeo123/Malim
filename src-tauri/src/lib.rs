@@ -1,3 +1,4 @@
+use base64::Engine;
 use dashmap::DashMap;
 use futures::stream::{self, StreamExt};
 use msedge_tts::tts::{client::connect, SpeechConfig};
@@ -49,10 +50,13 @@ mod saves;
 use saves::{check_import_file, create_export_temp_file, execute_import, get_backup_definitions};
 
 mod brain;
-mod resolver;
 mod dict;
+mod resolver;
 use brain::get_brain_words;
-use dict::{preload_korean_dictionary, preload_russian_dictionary, preload_spanish_dictionary, search_korean_dictionary, search_russian_dictionary, search_spanish_dictionary};
+use dict::{
+    preload_korean_dictionary, preload_russian_dictionary, preload_spanish_dictionary,
+    search_korean_dictionary, search_russian_dictionary, search_spanish_dictionary,
+};
 
 pub fn build_prompt(
     lang: &str,
@@ -223,7 +227,9 @@ pub fn build_prompt(
             prompt.push_str("- Prepositions: Include 'preposition' as pos, give English equivalent as definition.\n");
 
             if stress_mark {
-                prompt.push_str("- Stress: Add acute accents to stressed vowels per Spanish orthography.\n");
+                prompt.push_str(
+                    "- Stress: Add acute accents to stressed vowels per Spanish orthography.\n",
+                );
             }
 
             if show_grammar_notes {
@@ -231,12 +237,36 @@ pub fn build_prompt(
             }
             prompt.push_str("\n");
 
-            let note_verb = if show_grammar_notes { r#", "grammar_note": "Preterite 3rd person singular."# } else { "" };
-            let note_article = if show_grammar_notes { r#", "grammar_note": "Feminine singular definite article."# } else { "" };
-            let note_noun = if show_grammar_notes { r#", "grammar_note": "Feminine singular noun, subject."# } else { "" };
-            let note_prep = if show_grammar_notes { r#", "grammar_note": "Preposition indicating direction."# } else { "" };
-            let note_noun2 = if show_grammar_notes { r#", "grammar_note": "Feminine singular noun, object of preposition."# } else { "" };
-            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+            let note_verb = if show_grammar_notes {
+                r#", "grammar_note": "Preterite 3rd person singular."#
+            } else {
+                ""
+            };
+            let note_article = if show_grammar_notes {
+                r#", "grammar_note": "Feminine singular definite article."#
+            } else {
+                ""
+            };
+            let note_noun = if show_grammar_notes {
+                r#", "grammar_note": "Feminine singular noun, subject."#
+            } else {
+                ""
+            };
+            let note_prep = if show_grammar_notes {
+                r#", "grammar_note": "Preposition indicating direction."#
+            } else {
+                ""
+            };
+            let note_noun2 = if show_grammar_notes {
+                r#", "grammar_note": "Feminine singular noun, object of preposition."#
+            } else {
+                ""
+            };
+            let note_punct = if show_grammar_notes {
+                r#", "grammar_note": null"#
+            } else {
+                ""
+            };
 
             let example = format!(
                 r#"Example Output:
@@ -315,6 +345,15 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageInput {
+    id: String,
+    #[serde(rename = "dataUrl")]
+    data_url: String,
+    #[serde(rename = "fileName")]
+    file_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WordBlock {
     text: String,
     pos: String,
@@ -325,16 +364,20 @@ pub struct WordBlock {
     // Russian-specific fields:
     lemma: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_u8")]
-    gram_case: Option<u8>,       // 1-7
+    gram_case: Option<u8>, // 1-7
     gram_gender: Option<String>, // m / f / n
     gram_number: Option<String>, // sg / pl
     tense: Option<String>,       // pres / past / fut / imp / inf / gerund / ...
     aspect: Option<String>,      // impf / pf
     // Spanish-specific fields:
     #[serde(skip_serializing_if = "Option::is_none")]
-    mood: Option<String>,        // ind / subj / imp / cond
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_optional_u8")]
-    gram_person: Option<u8>,     // 1 / 2 / 3
+    mood: Option<String>, // ind / subj / imp / cond
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_u8"
+    )]
+    gram_person: Option<u8>, // 1 / 2 / 3
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -443,8 +486,7 @@ fn bfd_grouping(items: &[(usize, usize)], capacity: usize) -> Vec<Vec<usize>> {
         }
     }
 
-    bins
-        .into_iter()
+    bins.into_iter()
         .map(|(_, mut group)| {
             group.sort_unstable();
             group
@@ -461,9 +503,7 @@ fn split_into_k_groups(items: &[(usize, usize)], k: usize) -> Vec<Vec<usize>> {
     let mut left = items.iter().map(|(_, weight)| *weight).max().unwrap_or(0);
     let mut right = items.iter().map(|(_, weight)| *weight).sum::<usize>();
 
-    let can_split = |limit: usize| -> bool {
-        bfd_grouping(items, limit).len() <= group_count
-    };
+    let can_split = |limit: usize| -> bool { bfd_grouping(items, limit).len() <= group_count };
 
     while left < right {
         let mid = left + (right - left) / 2;
@@ -479,9 +519,11 @@ fn split_into_k_groups(items: &[(usize, usize)], k: usize) -> Vec<Vec<usize>> {
     let mut groups = bfd_grouping(items, limit);
 
     while groups.len() < group_count {
-        let heaviest_group_index = match groups.iter().enumerate().max_by_key(|(_, group)| {
-            group.iter().map(|index| weight_map[index]).sum::<usize>()
-        }) {
+        let heaviest_group_index = match groups
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, group)| group.iter().map(|index| weight_map[index]).sum::<usize>())
+        {
             Some((index, _)) => index,
             None => break,
         };
@@ -580,20 +622,72 @@ fn build_batch_prompt(
             }
             prompt.push_str("\n");
 
-            let note_pron1 = if show_grammar_notes { r#", "grammar_note": "Nominative form of 3rd person singular masculine pronoun."# } else { "" };
-            let note_verb1 = if show_grammar_notes { r#", "grammar_note": "Past tense masculine singular ending '-л'."# } else { "" };
-            let note_noun1_acc = if show_grammar_notes { r#", "grammar_note": "Feminine singular accusative ending '-у' replacing nominative '-а'."# } else { "" };
-            let note_prep1 = if show_grammar_notes { r#", "grammar_note": "Preposition denoting location, governing the prepositional case."# } else { "" };
-            let note_noun1_prep = if show_grammar_notes { r#", "grammar_note": "Masculine singular prepositional ending '-е' (hard consonant stem)."# } else { "" };
-            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+            let note_pron1 = if show_grammar_notes {
+                r#", "grammar_note": "Nominative form of 3rd person singular masculine pronoun."#
+            } else {
+                ""
+            };
+            let note_verb1 = if show_grammar_notes {
+                r#", "grammar_note": "Past tense masculine singular ending '-л'."#
+            } else {
+                ""
+            };
+            let note_noun1_acc = if show_grammar_notes {
+                r#", "grammar_note": "Feminine singular accusative ending '-у' replacing nominative '-а'."#
+            } else {
+                ""
+            };
+            let note_prep1 = if show_grammar_notes {
+                r#", "grammar_note": "Preposition denoting location, governing the prepositional case."#
+            } else {
+                ""
+            };
+            let note_noun1_prep = if show_grammar_notes {
+                r#", "grammar_note": "Masculine singular prepositional ending '-е' (hard consonant stem)."#
+            } else {
+                ""
+            };
+            let note_punct = if show_grammar_notes {
+                r#", "grammar_note": null"#
+            } else {
+                ""
+            };
 
-            let note_pron2 = if show_grammar_notes { r#", "grammar_note": "1st person singular pronoun in nominative."# } else { "" };
-            let note_verb2 = if show_grammar_notes { r#", "grammar_note": "1st person singular present ending '-ю' (stem ending in vowel)."# } else { "" };
-            let note_noun2_dat = if show_grammar_notes { r#", "grammar_note": "Masculine singular dative ending '-у' (hard consonant stem)."# } else { "" };
-            let note_noun2_acc = if show_grammar_notes { r#", "grammar_note": "Feminine singular accusative ending '-у' replacing nominative '-а'."# } else { "" };
-            let note_noun2_gen = if show_grammar_notes { r#", "grammar_note": "Masculine singular genitive ending '-я' (soft stem/partitive)."# } else { "" };
-            let note_prep2 = if show_grammar_notes { r#", "grammar_note": "Preposition denoting accompaniment, governing the instrumental case."# } else { "" };
-            let note_noun2_inst = if show_grammar_notes { r#", "grammar_note": "Neuter singular instrumental ending '-ом'."# } else { "" };
+            let note_pron2 = if show_grammar_notes {
+                r#", "grammar_note": "1st person singular pronoun in nominative."#
+            } else {
+                ""
+            };
+            let note_verb2 = if show_grammar_notes {
+                r#", "grammar_note": "1st person singular present ending '-ю' (stem ending in vowel)."#
+            } else {
+                ""
+            };
+            let note_noun2_dat = if show_grammar_notes {
+                r#", "grammar_note": "Masculine singular dative ending '-у' (hard consonant stem)."#
+            } else {
+                ""
+            };
+            let note_noun2_acc = if show_grammar_notes {
+                r#", "grammar_note": "Feminine singular accusative ending '-у' replacing nominative '-а'."#
+            } else {
+                ""
+            };
+            let note_noun2_gen = if show_grammar_notes {
+                r#", "grammar_note": "Masculine singular genitive ending '-я' (soft stem/partitive)."#
+            } else {
+                ""
+            };
+            let note_prep2 = if show_grammar_notes {
+                r#", "grammar_note": "Preposition denoting accompaniment, governing the instrumental case."#
+            } else {
+                ""
+            };
+            let note_noun2_inst = if show_grammar_notes {
+                r#", "grammar_note": "Neuter singular instrumental ending '-ом'."#
+            } else {
+                ""
+            };
 
             let he = "Он";
             let (read, read_lemma, book, book_lemma, table, table_lemma) = if stress_mark {
@@ -604,10 +698,43 @@ fn build_batch_prompt(
 
             let i_pron = "Я";
             let with_prep = "с";
-            let (give, give_lemma, brother, brother_lemma, cup, cup_lemma, tea, tea_lemma, milk, milk_lemma) = if stress_mark {
-                ("даю́", "дава́ть", "бра́ту", "бра́т", "ча́шку", "ча́шка", "ча́я", "ча́й", "молоко́м", "молоко́")
+            let (
+                give,
+                give_lemma,
+                brother,
+                brother_lemma,
+                cup,
+                cup_lemma,
+                tea,
+                tea_lemma,
+                milk,
+                milk_lemma,
+            ) = if stress_mark {
+                (
+                    "даю́",
+                    "дава́ть",
+                    "бра́ту",
+                    "бра́т",
+                    "ча́шку",
+                    "ча́шка",
+                    "ча́я",
+                    "ча́й",
+                    "молоко́м",
+                    "молоко́",
+                )
             } else {
-                ("даю", "давать", "брату", "брат", "чашку", "чашка", "чая", "чай", "молоком", "молоко")
+                (
+                    "даю",
+                    "давать",
+                    "брату",
+                    "брат",
+                    "чашку",
+                    "чашка",
+                    "чая",
+                    "чай",
+                    "молоком",
+                    "молоко",
+                )
             };
 
             let example = format!(
@@ -644,18 +771,37 @@ fn build_batch_prompt(
 }}
 
 "#,
-                he = he, note_pron1 = note_pron1,
-                read = read, read_lemma = read_lemma, note_verb1 = note_verb1,
-                book = book, book_lemma = book_lemma, note_noun1_acc = note_noun1_acc,
+                he = he,
+                note_pron1 = note_pron1,
+                read = read,
+                read_lemma = read_lemma,
+                note_verb1 = note_verb1,
+                book = book,
+                book_lemma = book_lemma,
+                note_noun1_acc = note_noun1_acc,
                 note_prep1 = note_prep1,
-                table = table, table_lemma = table_lemma, note_noun1_prep = note_noun1_prep,
-                i_pron = i_pron, note_pron2 = note_pron2,
-                give = give, give_lemma = give_lemma, note_verb2 = note_verb2,
-                brother = brother, brother_lemma = brother_lemma, note_noun2_dat = note_noun2_dat,
-                cup = cup, cup_lemma = cup_lemma, note_noun2_acc = note_noun2_acc,
-                tea = tea, tea_lemma = tea_lemma, note_noun2_gen = note_noun2_gen,
-                with_prep = with_prep, note_prep2 = note_prep2,
-                milk = milk, milk_lemma = milk_lemma, note_noun2_inst = note_noun2_inst,
+                table = table,
+                table_lemma = table_lemma,
+                note_noun1_prep = note_noun1_prep,
+                i_pron = i_pron,
+                note_pron2 = note_pron2,
+                give = give,
+                give_lemma = give_lemma,
+                note_verb2 = note_verb2,
+                brother = brother,
+                brother_lemma = brother_lemma,
+                note_noun2_dat = note_noun2_dat,
+                cup = cup,
+                cup_lemma = cup_lemma,
+                note_noun2_acc = note_noun2_acc,
+                tea = tea,
+                tea_lemma = tea_lemma,
+                note_noun2_gen = note_noun2_gen,
+                with_prep = with_prep,
+                note_prep2 = note_prep2,
+                milk = milk,
+                milk_lemma = milk_lemma,
+                note_noun2_inst = note_noun2_inst,
                 note_punct = note_punct
             );
             prompt.push_str(&example);
@@ -671,12 +817,36 @@ fn build_batch_prompt(
             prompt.push_str("- Verbs: Lemma MUST be Infinitive. Include tense, mood, person.\n");
             prompt.push_str("\n");
 
-            let note_verb = if show_grammar_notes { r#", "grammar_note": "Preterite 3rd person singular."# } else { "" };
-            let note_article = if show_grammar_notes { r#", "grammar_note": "Feminine singular definite article."# } else { "" };
-            let note_noun = if show_grammar_notes { r#", "grammar_note": "Feminine singular noun, subject."# } else { "" };
-            let note_prep = if show_grammar_notes { r#", "grammar_note": "Preposition indicating direction."# } else { "" };
-            let note_noun2 = if show_grammar_notes { r#", "grammar_note": "Feminine singular noun, object of preposition."# } else { "" };
-            let note_punct = if show_grammar_notes { r#", "grammar_note": null"# } else { "" };
+            let note_verb = if show_grammar_notes {
+                r#", "grammar_note": "Preterite 3rd person singular."#
+            } else {
+                ""
+            };
+            let note_article = if show_grammar_notes {
+                r#", "grammar_note": "Feminine singular definite article."#
+            } else {
+                ""
+            };
+            let note_noun = if show_grammar_notes {
+                r#", "grammar_note": "Feminine singular noun, subject."#
+            } else {
+                ""
+            };
+            let note_prep = if show_grammar_notes {
+                r#", "grammar_note": "Preposition indicating direction."#
+            } else {
+                ""
+            };
+            let note_noun2 = if show_grammar_notes {
+                r#", "grammar_note": "Feminine singular noun, object of preposition."#
+            } else {
+                ""
+            };
+            let note_punct = if show_grammar_notes {
+                r#", "grammar_note": null"#
+            } else {
+                ""
+            };
 
             let example = format!(
                 r#"Example Output:
@@ -709,7 +879,9 @@ fn build_batch_prompt(
             prompt.push_str(&example);
         }
         _ => {
-            prompt.push_str("Task: Sentence analysis (translation, tokenization, POS, definitions).\n\n");
+            prompt.push_str(
+                "Task: Sentence analysis (translation, tokenization, POS, definitions).\n\n",
+            );
             prompt.push_str(
                 r#"Example Output:
 {
@@ -1421,11 +1593,6 @@ async fn call_ai_api_batch(
     Ok(parsed)
 }
 
-
-
-
-
-
 // for parse_text task
 #[derive(Debug, Clone)]
 struct TaskContext {
@@ -1489,7 +1656,9 @@ async fn build_sentence_result(
             }
             let a_low = a.to_lowercase().next();
             let b_low = b.to_lowercase().next();
-            a_low == b_low || (a_low == Some('ё') && b_low == Some('е')) || (a_low == Some('е') && b_low == Some('ё'))
+            a_low == b_low
+                || (a_low == Some('ё') && b_low == Some('е'))
+                || (a_low == Some('е') && b_low == Some('ё'))
         };
 
         for block in blocks {
@@ -1561,7 +1730,10 @@ async fn build_sentence_result(
             }],
             raw.clone(),
         ),
-        SentenceAnalysis::Parsed { blocks, translation } => (blocks, translation),
+        SentenceAnalysis::Parsed {
+            blocks,
+            translation,
+        } => (blocks, translation),
         SentenceAnalysis::Error(err) => (
             vec![WordBlock {
                 text: raw.clone(),
@@ -1742,6 +1914,10 @@ async fn parse_text(
     ruaccent_url: String,
     old_sentences: Option<Vec<Sentence>>, //as cache in edit mode
     show_grammar_notes: bool,
+    images: Vec<ImageInput>,
+    ocr_api_key: String,
+    ocr_api_url: String,
+    ocr_model_name: String,
 ) -> Result<Vec<Sentence>, String> {
     if api_key.is_empty() {
         return Err("API Key is missing".to_string());
@@ -1758,27 +1934,108 @@ async fn parse_text(
     }
     let old_map = Arc::new(old_map);
 
+    // ocr
+    let mut full_text = text;
+
+    if !images.is_empty() {
+        let client = reqwest::Client::new();
+        for img in &images {
+            // find placeholder
+            let placeholder = format!("[image:{}]", img.id);
+            if !full_text.contains(&placeholder) {
+                continue;
+            }
+
+            let request_body = serde_json::json!({
+                        "model": &ocr_model_name,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": &img.data_url
+                                        }
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": "Extract the valid text content from this image."
+                                    }
+                                ],
+                                "thinking": {
+                                    "type":"disabled"
+                                }
+                            }
+                        ],
+                        "max_tokens": 1024,
+                    });
+
+            let extracted = match client
+                .post(&ocr_api_url)
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", ocr_api_key))
+                .json(&request_body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        resp.json::<serde_json::Value>()
+                            .await
+                            .ok()
+                            .and_then(|json| {
+                                // dbg!(&json);
+                                json["choices"][0]["message"]["content"]
+                                    .as_str()
+                                    .map(|s| s.trim().to_string())
+                            })
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_default()
+                    } else {
+                        let status = resp.status();
+                        let body = resp.text().await.unwrap_or_default();
+                        eprintln!("OCR HTTP {} for image {}: {}", status, img.id, body);
+                        String::new()
+                    }
+                }
+                Err(e) => {
+                    eprintln!("OCR request failed for image {}: {}", img.id, e);
+                    String::new()
+                }
+            };
+
+            if !extracted.is_empty() {
+                full_text = full_text.replacen(&placeholder, &extracted, 1);
+            } else {
+                full_text = full_text.replacen(&placeholder, "", 1);
+            }
+        }
+    }
+
+    // Split into sentences (no image marker logic needed)
     let mut raw_sentences: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut chars = text.chars().peekable();
+    let mut current_sentence_original = String::new();
+    let mut chars = full_text.chars().peekable();
+
     while let Some(c) = chars.next() {
-        current.push(c);
+        current_sentence_original.push(c);
         if matches!(c, '.' | '。' | '!' | '?' | '\n') {
             while let Some(&next_c) = chars.peek() {
                 if matches!(next_c, '.' | '。' | '!' | '?' | '\n') {
-                    current.push(chars.next().unwrap());
+                    current_sentence_original.push(chars.next().unwrap());
                 } else {
                     break;
                 }
             }
-            let trimmed = current.trim();
+            let trimmed = current_sentence_original.trim();
             if !trimmed.is_empty() {
                 raw_sentences.push(trimmed.to_string());
             }
-            current.clear();
+            current_sentence_original.clear();
         }
     }
-    let trimmed = current.trim();
+    let trimmed = current_sentence_original.trim();
     if !trimmed.is_empty() {
         raw_sentences.push(trimmed.to_string());
     }
@@ -1826,7 +2083,8 @@ async fn parse_text(
             let mut analyses: HashMap<usize, SentenceAnalysis> = HashMap::new();
             let mut preflights: HashMap<usize, SentencePreflight> = HashMap::new();
             let mut pending_sentences: Vec<(usize, String)> = Vec::new();
-            let is_ru = ctx.language.to_lowercase() == "ru" || ctx.language.to_lowercase() == "russian";
+            let is_ru =
+                ctx.language.to_lowercase() == "ru" || ctx.language.to_lowercase() == "russian";
 
             for &sentence_index in &group_indices {
                 let raw = raw_sentences[sentence_index].clone();
@@ -1859,7 +2117,10 @@ async fn parse_text(
 
                 let sentence_accent_handle = if is_ru && ruaccent_enabled && has_text_content {
                     let needs_accent = cached.as_ref().map_or(true, |sent| {
-                        !sent.blocks.iter().any(|block| block.text.contains('\u{0301}'))
+                        !sent
+                            .blocks
+                            .iter()
+                            .any(|block| block.text.contains('\u{0301}'))
                     });
 
                     if needs_accent {
@@ -1913,8 +2174,20 @@ async fn parse_text(
             if !pending_sentences.is_empty() {
                 if pending_sentences.len() == 1 {
                     let (sentence_index, raw) = pending_sentences.remove(0);
-                    let prompt = build_sentence_prompt(&ctx.language, &raw, !ruaccent_enabled, show_grammar_notes);
-                    let analysis = match call_ai_api_single(&ctx.api_key, &ctx.api_url, &ctx.model_name, prompt).await {
+                    let prompt = build_sentence_prompt(
+                        &ctx.language,
+                        &raw,
+                        !ruaccent_enabled,
+                        show_grammar_notes,
+                    );
+                    let analysis = match call_ai_api_single(
+                        &ctx.api_key,
+                        &ctx.api_url,
+                        &ctx.model_name,
+                        prompt,
+                    )
+                    .await
+                    {
                         Ok(result) => SentenceAnalysis::Parsed {
                             blocks: result.blocks,
                             translation: result.translation,
@@ -1923,8 +2196,15 @@ async fn parse_text(
                     };
                     analyses.insert(sentence_index, analysis);
                 } else {
-                    let prompt = build_batch_prompt(&ctx.language, &pending_sentences, !ruaccent_enabled, show_grammar_notes);
-                    match call_ai_api_batch(&ctx.api_key, &ctx.api_url, &ctx.model_name, prompt).await {
+                    let prompt = build_batch_prompt(
+                        &ctx.language,
+                        &pending_sentences,
+                        !ruaccent_enabled,
+                        show_grammar_notes,
+                    );
+                    match call_ai_api_batch(&ctx.api_key, &ctx.api_url, &ctx.model_name, prompt)
+                        .await
+                    {
                         Ok(items) => {
                             let mut result_map: HashMap<usize, AiParsedResult> = items
                                 .into_iter()
@@ -1944,7 +2224,8 @@ async fn parse_text(
                                     analyses.insert(
                                         sentence_index,
                                         SentenceAnalysis::Error(
-                                            "Batch AI response is missing one sentence result.".to_string(),
+                                            "Batch AI response is missing one sentence result."
+                                                .to_string(),
                                         ),
                                     );
                                 }
@@ -1952,7 +2233,8 @@ async fn parse_text(
                         }
                         Err(err) => {
                             for (sentence_index, _) in pending_sentences {
-                                analyses.insert(sentence_index, SentenceAnalysis::Error(err.clone()));
+                                analyses
+                                    .insert(sentence_index, SentenceAnalysis::Error(err.clone()));
                             }
                         }
                     }
@@ -1969,10 +2251,13 @@ async fn parse_text(
                         SentenceAnalysis::Punctuation
                     }
                 });
-                let sentence_preflight = preflights.remove(&sentence_index).unwrap_or(SentencePreflight {
-                    sentence_audio_handle: None,
-                    sentence_accent_handle: None,
-                });
+                let sentence_preflight =
+                    preflights
+                        .remove(&sentence_index)
+                        .unwrap_or(SentencePreflight {
+                            sentence_audio_handle: None,
+                            sentence_accent_handle: None,
+                        });
 
                 let result = build_sentence_result(
                     ctx.clone(),
@@ -1998,10 +2283,8 @@ async fn parse_text(
         .collect()
         .await;
 
-    let mut flattened_results: Vec<(usize, Sentence)> = unordered_results
-        .drain(..)
-        .flatten()
-        .collect();
+    let mut flattened_results: Vec<(usize, Sentence)> =
+        unordered_results.drain(..).flatten().collect();
 
     flattened_results.sort_by_key(|(i, _)| *i);
     let results: Vec<Sentence> = flattened_results.into_iter().map(|(_, s)| s).collect();
@@ -2197,6 +2480,24 @@ async fn sync_memory(
     Ok("Sync finished.".to_string())
 }
 
+#[tauri::command]
+async fn fetch_image_as_base64(url: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let bytes = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {}", e))?
+        .bytes()
+        .await
+        .map_err(|e| format!("Read body failed: {}", e))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(b64)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Workaround for Adreno Vulkan GPU bugs:
@@ -2281,7 +2582,8 @@ pub fn run() {
             search_korean_dictionary,
             preload_spanish_dictionary,
             search_spanish_dictionary,
-            update_chat_parsed
+            update_chat_parsed,
+            fetch_image_as_base64,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,21 +4,18 @@
         activeArticleId, settings,
         parsingQueue,
     } from "../lib/stores";
-    import { ArrowLeft, Check, ChevronDown } from "lucide-svelte";
+    import { ArrowLeft, Check, ChevronDown, X } from "lucide-svelte";
     import { slide } from "svelte/transition";
     import { v4 as uuidv4 } from "uuid";
     import Flag from "./Flag.svelte";
-    import type { Article } from "../lib/types";
+    import type { Article, ImageAttachment, ImageParticle } from "../lib/types";
     import { processQueue } from "../lib/parser";
     import { onDestroy } from "svelte";
     import { notifications } from '../lib/notificationStore';
+    import { invoke } from '@tauri-apps/api/core';
 
     let showLangSelector = false;
-    let wordCount = 0;
-    
-    $: wordCount = $editorDraft.content
-        ? $editorDraft.content.trim().split(/\s+/).length
-        : 0;
+    $: wordCount = !$editorDraft.content?.trim() ? 0 : $editorDraft.content.trim().split(/\s+/).length;
 
     function goBack() {
         popView();
@@ -27,11 +24,104 @@
         // if (unlisten) unlisten();
     });
 
+    function handlePaste(e: ClipboardEvent) {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
+        if (imageItems.length > 0) {
+            e.preventDefault();
+            for (const item of imageItems) {
+                const file = item.getAsFile();
+                if (!file) continue;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const dataUrl = ev.target?.result as string;
+                    const newImage: ImageAttachment = {
+                        id: uuidv4(),
+                        dataUrl,
+                        mimeType: file.type,
+                        fileName: file.name || `pasted_image_${Date.now()}.png`,
+                        extractedText: '',
+                        ocrStatus: 'pending',
+                    };
+                    editorDraft.update(d => ({
+                        ...d,
+                        images: [...(d.images || []), newImage],
+                    }));
+                };
+                reader.readAsDataURL(file);
+            }
+            return;
+        }
+
+        const htmlItem = Array.from(items).find(item => item.type === 'text/html');
+        if (htmlItem) {
+            htmlItem.getAsString((html) => {
+                const imgMatch = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+                if (imgMatch) {
+                    e.preventDefault();
+                    const src = imgMatch[1];
+                    if (src.startsWith('data:')) {
+                        const mimeMatch = src.match(/^data:([^;]+)/);
+                        const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+                        const newImage: ImageAttachment = {
+                            id: uuidv4(),
+                            dataUrl: src,
+                            mimeType,
+                            fileName: `pasted_image_${Date.now()}.png`,
+                            extractedText: '',
+                            ocrStatus: 'pending',
+                        };
+                        editorDraft.update(d => ({
+                            ...d,
+                            images: [...(d.images || []), newImage],
+                        }));
+                    } else if (src.startsWith('http')) {
+                        invoke<string>('fetch_image_as_base64', { url: src })
+                            .then((base64) => {
+                                const extMatch = src.match(/\.(png|jpg|jpeg|gif|webp|bmp)(\?|$)/i);
+                                const ext = extMatch ? extMatch[1].toLowerCase() : 'png';
+                                const mimeMap: Record<string, string> = {
+                                    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                                    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
+                                };
+                                const mimeType = mimeMap[ext] || 'image/png';
+                                const dataUrl = `data:${mimeType};base64,${base64}`;
+                                const newImage: ImageAttachment = {
+                                    id: uuidv4(),
+                                    dataUrl,
+                                    mimeType,
+                                    fileName: `pasted_image_${Date.now()}.${ext}`,
+                                    extractedText: '',
+                                    ocrStatus: 'pending',
+                                };
+                                editorDraft.update(d => ({
+                                    ...d,
+                                    images: [...(d.images || []), newImage],
+                                }));
+                            })
+                            ;
+                    }
+                }
+            });
+        }
+    }
+
+    function removeImage(id: string) {
+        editorDraft.update(d => ({
+            ...d,
+            images: d.images ? d.images.filter(img => img.id !== id) : [],
+        }));
+    }
+
     async function handleConfirm() {
         const contentSnapshot = $editorDraft.content;
         const languageSnapshot = $editorDraft.language;
+        const imagesSnapshot = $editorDraft.images || [];
 
-        if (!contentSnapshot.trim()) return;
+
+        if (!contentSnapshot.trim() && imagesSnapshot.length === 0) return;
 
         if (!$settings.defaultAiConfigId) {
             notifications.warning("Default AI configuration not found.");
@@ -43,25 +133,40 @@
 
         const existingArticle = isEditMode ? $articles.find(a => a.id === id) : null;
 
-        const firstSentenceEnd = contentSnapshot.search(/[.。!?]\n?/);
+        let fullContent = contentSnapshot;
+        const imageParticles: ImageParticle[] = [];
+        imagesSnapshot.forEach((img, idx) => {
+            const placeholder = `[image:${img.id}]`;
+            fullContent += '\n' + placeholder;
+            imageParticles.push({
+                attachmentId: img.id,
+                dataUrl: img.dataUrl,
+                extractedText: '',
+                index: idx,
+                fileName: img.fileName,
+            });
+        });
+
+        const firstSentenceEnd = fullContent.search(/[.。!?]\n?/);
         const newArticle: Article = {
             id: id,
             title:
                 firstSentenceEnd !== -1
-                    ? contentSnapshot.slice(0, firstSentenceEnd + 1) +
-                      (contentSnapshot.length > firstSentenceEnd + 1
+                    ? fullContent.slice(0, firstSentenceEnd + 1) +
+                      (fullContent.length > firstSentenceEnd + 1
                           ? "..."
                           : "")
-                    : contentSnapshot.slice(0, 20) +
-                      (contentSnapshot.length > 20 ? "..." : ""),
+                    : fullContent.slice(0, 20) +
+                      (fullContent.length > 20 ? "..." : ""),
             preview:
                 firstSentenceEnd !== -1
-                    ? contentSnapshot.slice(firstSentenceEnd + 1).slice(0, 50)
-                    : contentSnapshot.slice(0, 50),
+                    ? fullContent.slice(firstSentenceEnd + 1).slice(0, 50)
+                    : fullContent.slice(0, 50),
             status: "parsing",
             parsingProgress: 0,
             sentences: existingArticle?.sentences || [],
-            draftContent: contentSnapshot,
+            imageParticles: imageParticles,
+            draftContent: fullContent,
             language: languageSnapshot,
             readProgress: existingArticle?.readProgress || 0,
             completedCheckpointsList: existingArticle?.completedCheckpointsList || [],
@@ -77,12 +182,11 @@
             articles.update((items) => [newArticle, ...items]);
         }
 
-        editorDraft.set({ title: "", content: "", language: "RU" });
+        editorDraft.set({ title: "", content: "", language: "RU", images: [] });
         popView();
         parsingQueue.update((q) => [...q, id]);
         processQueue();
-        notifications.success(isEditMode ? "Article updated!" : 
-            "Article created!");
+        notifications.success(isEditMode ? "Article updated!" : "Article created!");
     }
 </script>
 
@@ -158,16 +262,50 @@
         </div>
     </div>
 
-    <textarea
-        class="flex-1 w-full p-6 text-lg resize-none outline-none text-zinc-800 placeholder:text-zinc-300 leading-relaxed dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:bg-transparent"
-        placeholder="Paste your text here..."
-        bind:value={$editorDraft.content}
-    ></textarea>
+    <div class="flex-1 flex flex-col overflow-y-auto">
+        <textarea
+            class="w-full min-h-[200px] p-6 text-lg resize-none outline-none text-zinc-800 placeholder:text-zinc-300 leading-relaxed dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:bg-transparent"
+            placeholder="Paste your text here... (you can also paste images)"
+            bind:value={$editorDraft.content}
+            on:paste={handlePaste}
+        ></textarea>
+
+        {#if ($editorDraft.images || []).length > 0}
+            <div class="px-6 pb-4 space-y-3">
+                <div class="text-xs font-medium text-zinc-400 uppercase tracking-wider">Attached Images</div>
+                <div class="flex flex-wrap gap-3">
+                    {#each ($editorDraft.images || []) as img (img.id)}
+                        <div class="relative group">
+                            <img
+                                src={img.dataUrl}
+                                alt={img.fileName}
+                                class="w-28 h-28 object-cover rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm"
+                            />
+                            <button
+                                on:click={() => removeImage(img.id)}
+                                class="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600"
+                            >
+                                <X size={14} />
+                            </button>
+                            <div class="absolute bottom-1 left-1 right-1 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded text-center truncate opacity-0 group-hover:opacity-100 transition-opacity">
+                                {img.fileName}
+                            </div>
+                        </div>
+                    {/each}
+                </div>
+            </div>
+        {/if}
+    </div>
 
     <div
         class="p-4 border-t border-zinc-100 flex justify-between items-center bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90"
     >
-        <span class="text-xs font-mono text-zinc-400">{wordCount} words</span>
+        <div class="flex items-center gap-3">
+            <span class="text-xs font-mono text-zinc-400">{wordCount} words</span>
+            {#if ($editorDraft.images || []).length > 0}
+                <span class="text-xs font-mono text-zinc-400">| {($editorDraft.images || []).length} image(s)</span>
+            {/if}
+        </div>
         <button
             on:click={handleConfirm}
             class="bg-zinc-900 text-white p-3 rounded-full hover:bg-black transition shadow-lg hover:shadow-xl active:scale-95 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"

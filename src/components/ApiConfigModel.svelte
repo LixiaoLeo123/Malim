@@ -34,6 +34,11 @@
             label: "Grammar Correction",
             description: "Language correction tasks",
         },
+        {
+            key: "ocr",
+            label: "Image Recognition",
+            description: "Extract text from images",
+        },
     ];
 
     let showDataManagement = false;
@@ -57,7 +62,7 @@
         modelName: string;
     };
 
-    type AiRole = "default" | "main" | "shadow" | "embed" | "grammar";
+    type AiRole = "default" | "main" | "shadow" | "embed" | "grammar" | "ocr";
 
     let tempAiConfigList: AiConfig[] = [];
 
@@ -69,6 +74,7 @@
         shadow: "",
         embed: "",
         grammar: "",
+        ocr: "",
     };
 
     let tempConcurrency = 1;
@@ -103,6 +109,7 @@
             shadow: $settings.shadowAiConfigId ?? "",
             embed: $settings.embedAiConfigId ?? "",
             grammar: $settings.grammarAiConfigId ?? "",
+			ocr: $settings.ocrAiConfigId ?? "",
         };
 
         tempConcurrency = $settings.concurrency;
@@ -278,6 +285,7 @@
             shadowAiConfigId: selectedIds.shadow,
             embedAiConfigId: selectedIds.embed,
             grammarAiConfigId: selectedIds.grammar,
+            ocrAiConfigId: selectedIds.ocr,
 
             concurrency: tempConcurrency,
             criticalValue: tempCriticalValue,

@@ -68,7 +68,8 @@ export const translatorTargetLang = writable<string>("RU");
 export const editorDraft = writable<Draft>({
   title: '',
   content: '',
-  language: 'RU'
+  language: 'RU',
+  images: []
 });
 
 const defaultSettings: Settings = {
@@ -78,6 +79,7 @@ const defaultSettings: Settings = {
   shadowAiConfigId: '',
   embedAiConfigId: '',
   grammarAiConfigId: '',
+  ocrAiConfigId: '',
   concurrency: 1,
   criticalValue: 80,
   showGrammarNotes: false,

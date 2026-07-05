@@ -1,0 +1,376 @@
+// src/lib/parser.ts
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { get } from "svelte/store";
+import {
+    articles,
+    parsingQueue,
+    isProcessingQueue,
+    settings,
+} from "./stores";
+import { notifications } from './notificationStore';
+import type { Article, ImageAttachment } from './types';
+
+// ── OCR: extract text from a single image using the configured OCR AI ──
+
+async function extractTextFromImage(
+  dataUrl: string,
+  mimeType: string,
+): Promise<string> {
+  const currentSettings = get(settings);
+  const ocrConfig = currentSettings.aiConfigList.find(
+    (c) => c.id === currentSettings.ocrAiConfigId,
+  );
+
+  if (!ocrConfig) {
+    console.warn("OCR AI config not found, skipping image OCR.");
+    return "";
+  }
+
+  const systemPrompt =
+    "You are an OCR assistant. Extract all meaningful written text from the image. " +
+    "Ignore watermarks, dates, usernames, UI elements, logos, and any non-content decorative text. " +
+    "Only output the extracted text as plain paragraphs. If no meaningful text is found, return an empty string.";
+
+  const payload = {
+    model: ocrConfig.modelName,
+    messages: [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+          {
+            type: "text",
+            text: "Extract all meaningful text from this image. Ignore dates, usernames, watermarks, and UI decorations.",
+          },
+        ],
+      },
+    ],
+    max_tokens: 2048,
+  };
+
+  try {
+    const response = await fetch(ocrConfig.apiUrl + "/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${ocrConfig.apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "Unknown error");
+      throw new Error(`OCR API error ${response.status}: ${errText}`);
+    }
+
+    const data = await response.json();
+    const text = data?.choices?.[0]?.message?.content?.trim() ?? "";
+    return text;
+  } catch (err) {
+    console.error("OCR extraction failed:", err);
+    return "";
+  }
+}
+
+// ── OCR all images for an article, updating the store in parallel ──
+
+async function processImageOcr(article: Article): Promise<Article> {
+  if (!article.imageParticles || article.imageParticles.length === 0) {
+    return article;
+  }
+
+  // Get image data from the draft content — we stored dataUrls in the
+  // Editor's image store. The images array is embedded in draftContent
+  // as markers. We need to reconstruct the image data from the article's
+  // context. Since the draft was created from editorDraft.images, we can
+  // rebuild them by scanning the article's imageParticles.
+
+  // Actually, the dataUrl is heavy and shouldn't be persisted in Article.
+  // Instead, during parsing we look up the dataUrls from a temporary store.
+  // For simplicity and to avoid persisting heavy data, we'll do OCR at
+  // Editor time — right when the article is created.
+  // 
+  // Approach: OCR is done per-image during processQueue, using the
+  // draftContent's [image:id] markers. We need the actual image data.
+  // We'll store base64 data in the article temporarily during parsing.
+  // 
+  // Better approach: store image data directly in the article's imageParticles
+  // during creation, and do OCR here asynchronously.
+
+  // Let's do OCR for each image in parallel:
+  const ocrResults = await Promise.allSettled(
+    article.imageParticles.map(async (ip) => {
+      // Find the image attachment data — we stored it in draftContent as
+      // dataUrl markers. We need to rebuild this from the images array.
+      // Since the Article is created from editorDraft, the dataUrls are
+      // not persisted. We'll do OCR at a different point.
+      // 
+      // Instead: we perform OCR right in the Editor when the article is
+      // created, or we store a lightweight reference.
+      // 
+      // For now, we store dataUrl temporarily in the imageParticle.
+      // The dataUrl is available in the draft's images array at creation time.
+      // We need to pass it through.
+
+      // This function is called from processQueue. The image data should
+      // be passed along. We'll restructure so the dataUrls are available.
+      return { attachmentId: ip.attachmentId, text: "" };
+    }),
+  );
+
+  // Update the article with OCR results
+  const updatedImageParticles = article.imageParticles.map((ip, idx) => {
+    const result = ocrResults[idx];
+    const extractedText =
+      result?.status === "fulfilled" ? result.value.text : "";
+    return { ...ip, extractedText };
+  });
+
+  return { ...article, imageParticles: updatedImageParticles };
+}
+
+// ── The OCR function called inline from processQueue ──
+// Since the image data is not persisted in the Article, we pass it
+// alongside when creating the article in Editor.svelte.
+// We store the dataUrls in a module-level Map keyed by articleId.
+// This is cleared after processing.
+
+const articleImageData = new Map<string, ImageAttachment[]>();
+
+export function setArticleImageData(articleId: string, images: ImageAttachment[]) {
+  articleImageData.set(articleId, images);
+}
+
+export function clearArticleImageData(articleId: string) {
+  articleImageData.delete(articleId);
+}
+
+async function runOcrForArticle(articleId: string): Promise<void> {
+  const currentArticles = get(articles);
+  const article = currentArticles.find((a) => a.id === articleId);
+  if (!article || !article.imageParticles || article.imageParticles.length === 0) return;
+
+  const images = articleImageData.get(articleId) || [];
+  if (images.length === 0) return;
+
+  const currentSettings = get(settings);
+  const ocrConfig = currentSettings.aiConfigList.find(
+    (c) => c.id === currentSettings.ocrAiConfigId,
+  );
+  if (!ocrConfig) return;
+
+  // Update all images to "processing" status
+  const updatedImages = images.map(img => ({ ...img, ocrStatus: 'processing' as const }));
+  articleImageData.set(articleId, updatedImages);
+
+  // Run OCR for each image in parallel
+  const ocrPromises = images.map(async (img) => {
+    const systemPrompt =
+      "You are an OCR assistant. Extract all meaningful written text from the image. " +
+      "Ignore watermarks, dates, usernames, UI elements, logos, and any non-content decorative text. " +
+      "Only output the extracted text as plain paragraphs. If no meaningful text is found, return an empty string.";
+
+    const payload = {
+      model: ocrConfig.modelName,
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: img.dataUrl, detail: "high" } },
+            {
+              type: "text",
+              text: "Extract all meaningful text from this image. Ignore dates, usernames, watermarks, and UI decorations.",
+            },
+          ],
+        },
+      ],
+      max_tokens: 2048,
+    };
+
+    try {
+      const response = await fetch(ocrConfig.apiUrl + "/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${ocrConfig.apiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "Unknown error");
+        throw new Error(`OCR API error ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      const text = data?.choices?.[0]?.message?.content?.trim() ?? "";
+      return { ...img, extractedText: text, ocrStatus: 'done' as const };
+    } catch (err) {
+      console.error(`OCR failed for image ${img.id}:`, err);
+      return { ...img, extractedText: '', ocrStatus: 'error' as const };
+    }
+  });
+
+  const results = await Promise.all(ocrPromises);
+  articleImageData.set(articleId, results);
+
+  // Update article's imageParticles with extracted text
+  articles.update((items) =>
+    items.map((a) => {
+      if (a.id !== articleId) return a;
+      const updatedParticles = a.imageParticles.map((ip) => {
+        const imgData = results.find((r) => r.id === ip.attachmentId);
+        return {
+          ...ip,
+          extractedText: imgData?.extractedText || ip.extractedText,
+        };
+      });
+      return { ...a, imageParticles: updatedParticles };
+    }),
+  );
+}
+
+export function getArticleImageData(articleId: string): ImageAttachment[] {
+  return articleImageData.get(articleId) || [];
+}
+
+// ── Main queue processor ──
+
+export async function processQueue() {
+    const isProcessing = get(isProcessingQueue);
+    const queue = get(parsingQueue);
+
+    if (isProcessing || queue.length === 0) return;
+
+    isProcessingQueue.set(true);
+
+    const currentId = queue[0];
+    const currentArticles = get(articles);
+    const currentArticle = currentArticles.find((a) => a.id === currentId);
+
+    if (!currentArticle || !currentArticle.draftContent) {
+        parsingQueue.update((q) => q.slice(1));
+        isProcessingQueue.set(false);
+        processQueue();
+        return;
+    }
+
+    const currentSettings = get(settings);
+
+    const unlisten = await listen<any>("parsing-progress", (event) => {
+        const payload = event.payload;
+        if (payload.id === currentId) {
+            articles.update((items) =>
+                items.map((i) => {
+                    if (i.id === currentId) {
+                        return { ...i, parsingProgress: payload.percent };
+                    }
+                    return i;
+                })
+            );
+        }
+    });
+
+    try {
+        function getConfigById(id: string | undefined) {
+            if (!id) return undefined;
+            return currentSettings.aiConfigList.find((c) => c.id === id);
+        }
+        const defaultConfig = getConfigById(currentSettings.defaultAiConfigId);
+        if (!defaultConfig) {
+            notifications.error("Please configure your API first.");
+            throw new Error("Default AI configuration not found");
+        }
+
+        // ── Parallel: Run OCR and text parsing concurrently ──
+        const hasImages = currentArticle.imageParticles && currentArticle.imageParticles.length > 0;
+
+        let ocrPromise: Promise<void> | null = null;
+        if (hasImages) {
+            ocrPromise = runOcrForArticle(currentId);
+        }
+
+        // Start text parsing (the main parse_text invocation)
+        const parseTextPromise = invoke("parse_text", {
+            id: currentId,
+            text: currentArticle.draftContent,
+            language: currentArticle.language,
+            apiKey: defaultConfig.apiKey,
+            apiUrl: defaultConfig.apiUrl,
+            modelName: defaultConfig.modelName,
+            concurrency: currentSettings.concurrency,
+            criticalValue: currentSettings.criticalValue,
+            ttsConcurrency: currentSettings.ttsConcurrency,
+            preCacheAudio: currentSettings.preCacheAudio,
+            ttsApi: currentSettings.ttsApi,
+            qwenApiKey: currentSettings.qwenApiKey,
+            qwenVoice: currentSettings.qwenVoice,
+            sileroTtsUrl: currentSettings.sileroUrl,
+            ruaccentEnabled: currentSettings.ruaccentEnabled,
+            ruaccentUrl: currentSettings.ruaccentUrl,
+            oldSentences: currentArticle.sentences || null,
+            showGrammarNotes: currentSettings.showGrammarNotes,
+        });
+
+        // Wait for both to complete
+        const [result] = await Promise.all([parseTextPromise, ocrPromise].filter(Boolean));
+
+        // After both are done, merge OCR text into the parsed sentences.
+        // If OCR results are available, we prepend an artificial sentence
+        // with the extracted image text for each image.
+        let finalSentences: any = result;
+        if (hasImages) {
+            const imageData = articleImageData.get(currentId) || [];
+            const ocrTexts = imageData
+              .filter(img => img.extractedText && img.ocrStatus === 'done')
+              .map(img => img.extractedText);
+
+            if (ocrTexts.length > 0) {
+                // Prepend OCR-extracted text as additional context sentences
+                // These will be displayed alongside the original parsed sentences
+                const ocrSentences = ocrTexts.map((text, idx) => ({
+                    id: `ocr-${currentId}-${idx}`,
+                    original: `[Image ${idx + 1}] ${text}`,
+                    blocks: [],
+                    translation: '',
+                    audio_path: null,
+                    _isOcr: true,
+                    _imageIndex: idx,
+                }));
+
+                // Insert OCR sentences at the beginning so users see them first
+                finalSentences = [...ocrSentences, ...finalSentences];
+            }
+        }
+
+        articles.update((items) =>
+            items.map((i) => {
+                if (i.id === currentId) {
+                    return { ...i, status: "done" as const, sentences: finalSentences, parsingProgress: 100 };
+                }
+                return i;
+            })
+        );
+        notifications.success("Parsing completed!");
+    } catch (e) {
+        console.error("Analysis Failed:", e);
+        articles.update((items) =>
+            items.map((i) =>
+                i.id === currentId
+                    ? { ...i, status: "error" as const, parsingProgress: 0 }
+                    : i
+            )
+        );
+        notifications.error(`Parsing failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+        unlisten();
+        // Clean up image data after processing
+        clearArticleImageData(currentId);
+        parsingQueue.update((q) => q.slice(1));
+        isProcessingQueue.set(false);
+        processQueue();
+    }
+}

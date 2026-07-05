@@ -58,3 +58,4 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 similar = "2.6"
+base64 = "0.22"

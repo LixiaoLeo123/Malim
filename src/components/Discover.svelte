@@ -300,6 +300,7 @@
             title: selectedArticle.title,
             content: selectedArticle.title + ".\n" + selectedArticle.content,
             language: selectedArticle.language.toUpperCase(),
+            images: [],
         });
         // console.log("Added to draft:", selectedArticle?.title);
         notifications.success("Article added to draft!");
@@ -317,11 +318,13 @@
             status: "parsing",
             parsingProgress: 0,
             sentences: [],
+            imageParticles: [],
             draftContent: selectedArticle?.title + ".\n" + selectedArticle?.content || "",
             language: selectedArticle?.language.toUpperCase() || "RU",
             readProgress: 0,
             completedCheckpointsList: [],
             stared: false,
+            tags: [],
         };
 
         libraryArticles.update((items) => [newArticle, ...items]);

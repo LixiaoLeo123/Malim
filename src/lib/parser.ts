@@ -9,13 +9,13 @@ import {
     settings,
 } from "./stores";
 import { notifications } from './notificationStore';
+import type { Article, Sentence } from './types';
+
 
 export async function processQueue() {
-    const isProcessing = get(isProcessingQueue);
+    if (get(isProcessingQueue)) return;
     const queue = get(parsingQueue);
-
-    if (isProcessing || queue.length === 0) return;
-
+    if (queue.length === 0) return;
     isProcessingQueue.set(true);
 
     const currentId = queue[0];
@@ -55,7 +55,18 @@ export async function processQueue() {
             notifications.error("Please configure your API first.");
             throw new Error("Default AI configuration not found");
         }
-        const result: any = await invoke("parse_text", {
+
+        const ocrConfig = getConfigById(currentSettings.ocrAiConfigId);
+        if (!ocrConfig) {
+            notifications.error("Please configure your OCR API first.");
+            throw new Error("OCR AI configuration not found");
+        }
+
+        const imageInputs: { id: string; dataUrl: string; fileName: string }[] = (currentArticle.imageParticles || [])
+            .map(ip => ({ id: ip.attachmentId, dataUrl: ip.dataUrl || '', fileName: ip.fileName || '' }))
+            .filter(ip => !!ip.dataUrl);
+
+        const result = await invoke<Sentence[]>("parse_text", {
             id: currentId,
             text: currentArticle.draftContent,
             language: currentArticle.language,
@@ -74,6 +85,10 @@ export async function processQueue() {
             ruaccentUrl: currentSettings.ruaccentUrl,
             oldSentences: currentArticle.sentences || null,
             showGrammarNotes: currentSettings.showGrammarNotes,
+            images: imageInputs,
+            ocrApiKey: ocrConfig.apiKey,
+            ocrApiUrl: ocrConfig.apiUrl,
+            ocrModelName: ocrConfig.modelName,
         });
 
         articles.update((items) =>

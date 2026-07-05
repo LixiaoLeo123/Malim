@@ -180,6 +180,7 @@
             title: article.title,
             content: article.draftContent ? article.draftContent : "",
             language: article.language,
+            images: [],
         });
         activeArticleId.set(article.id);
         pushView("editor");
