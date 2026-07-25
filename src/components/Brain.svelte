@@ -372,6 +372,8 @@
                 </p>
             </div>
             <button
+                type="button"
+                aria-label="Close brain details"
                 on:click={() => (open = false)}
                 class="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-2"
             >

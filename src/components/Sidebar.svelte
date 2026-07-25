@@ -7,7 +7,7 @@
     import TagEditorModal from "./TagEditorModal.svelte";
     import {
         Globe, MessageCircle, Star,
-        Languages, BookOpenText,
+        Languages, BookOpenText, Waypoints,
     } from "lucide-svelte";
     import {
         articles, activeArticleId,
@@ -243,24 +243,37 @@
 </script>
 
 <div
-    class="flex flex-col h-full bg-[#f9fafb] border-r border-zinc-200/60 w-full md:w-[320px] dark:bg-[#0f0f11] dark:border-zinc-800/60"
+    class="flex flex-col h-full w-full md:w-[336px] bg-[#fbfaff]/95 text-zinc-900 dark:bg-[#17141d]/95 dark:text-zinc-100"
 >
     <!-- ── Header ── -->
     <div
-        class="px-5 py-4 flex justify-between items-center bg-[#f9fafb]/90 dark:bg-[#0f0f11]/90 backdrop-blur-md sticky top-0 z-20 pt-[calc(env(safe-area-inset-top)+1rem)] border-b border-zinc-100 dark:border-zinc-900/50 shadow-sm transition-all"
+        class="px-5 py-4 flex justify-between items-center bg-white/65 dark:bg-white/[0.03] backdrop-blur-xl sticky top-0 z-20 pt-[calc(env(safe-area-inset-top)+1rem)] border-b border-violet-100/80 dark:border-white/10 transition-all"
     >
         <button
             type="button"
             class="group flex items-center gap-3 cursor-pointer select-none"
-            on:click={() => (showBrain = true)}
+            on:click={() => {
+                resetToView("home");
+                isSidebarOpen.set(false);
+            }}
+            aria-label="Return to home"
         >
             <span
-                class="font-extrabold text-[22px] tracking-tight text-zinc-900 dark:text-white transition-all duration-300 transform group-hover:scale-[1.02] group-active:scale-95"
+                class="font-black text-[23px] tracking-[-0.04em] text-[#17151f] dark:text-white transition-all duration-300 transform group-hover:scale-[1.02] group-active:scale-95"
             >
-                Malim<span class="text-[#660874] dark:text-[#8857e1]">.</span>
+                Malim<span class="text-violet-600 dark:text-violet-400">.</span>
             </span>
         </button>
         <div class="flex items-center gap-1">
+            <button
+                type="button"
+                on:click={() => (showBrain = true)}
+                class="rounded-xl p-2 text-violet-500 transition-all hover:bg-violet-100/70 hover:text-violet-700 active:scale-95 dark:text-violet-300 dark:hover:bg-violet-500/15 dark:hover:text-violet-200"
+                title="Cognitive landscape"
+                aria-label="Open cognitive landscape"
+            >
+                <Waypoints size={18} strokeWidth={2.25} />
+            </button>
             {#if showSyncButton}
                 <button
                     on:click={handleSync}
@@ -294,7 +307,7 @@
             </button>
             <button
                 on:click={handleAdd}
-                class="p-2 ml-1 text-white bg-zinc-900 hover:bg-zinc-800 active:scale-95 rounded-xl transition-all duration-200 shadow-sm dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-white dark:hover:shadow-md"
+                class="ml-1 rounded-2xl bg-violet-600 p-2 text-white shadow-lg shadow-violet-500/25 transition-all duration-200 hover:bg-violet-700 active:scale-95 dark:bg-violet-500 dark:hover:bg-violet-400 dark:hover:shadow-violet-500/20"
                 title="New Article"
             >
                 <Plus size={18} strokeWidth={2.5} />
@@ -359,11 +372,11 @@
 
     <!-- ── Scrollable content ── -->
     <div
-        class="flex-1 overflow-y-auto no-scrollbar pb-6"
+        class="flex-1 overflow-y-auto no-scrollbar bg-gradient-to-b from-transparent via-transparent to-violet-50/60 pb-6 dark:to-violet-950/10"
         on:scroll={handleListScroll}
     >
         <!-- Menu section -->
-        <div class="px-3 pt-3 mb-2 space-y-[2px]">
+        <div class="px-4 pt-5 mb-2 space-y-1">
             <div
                 class="px-2 pt-1 pb-2 text-[10px] font-bold tracking-[0.15em] text-zinc-400 dark:text-zinc-500 uppercase"
             >
@@ -371,7 +384,7 @@
             </div>
             <button
                 on:click={handleDiscover}
-                class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-zinc-700 dark:text-zinc-300 hover:bg-white dark:hover:bg-zinc-900 transition-all hover:shadow-sm border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 active:scale-[0.98] group"
+                class="w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-zinc-700 dark:text-zinc-300 hover:bg-white/90 dark:hover:bg-white/[0.06] transition-all hover:shadow-[0_8px_24px_-18px_rgba(76,29,149,0.65)] border border-transparent hover:border-violet-100 dark:hover:border-white/10 active:scale-[0.98] group"
             >
                 <div class="flex items-center gap-3">
                     <Globe
@@ -384,7 +397,7 @@
             </button>
             <button
                 on:click={handleChat}
-                class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-zinc-700 dark:text-zinc-300 hover:bg-white dark:hover:bg-zinc-900 transition-all hover:shadow-sm border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 active:scale-[0.98] group"
+                class="w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-zinc-700 dark:text-zinc-300 hover:bg-white/90 dark:hover:bg-white/[0.06] transition-all hover:shadow-[0_8px_24px_-18px_rgba(76,29,149,0.65)] border border-transparent hover:border-violet-100 dark:hover:border-white/10 active:scale-[0.98] group"
             >
                 <div class="flex items-center gap-3">
                     <MessageCircle
@@ -397,7 +410,7 @@
             </button>
             <button
                 on:click={handleTranslator}
-                class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-zinc-700 dark:text-zinc-300 hover:bg-white dark:hover:bg-zinc-900 transition-all hover:shadow-sm border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 active:scale-[0.98] group"
+                class="w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-zinc-700 dark:text-zinc-300 hover:bg-white/90 dark:hover:bg-white/[0.06] transition-all hover:shadow-[0_8px_24px_-18px_rgba(76,29,149,0.65)] border border-transparent hover:border-violet-100 dark:hover:border-white/10 active:scale-[0.98] group"
             >
                 <div class="flex items-center gap-3">
                     <Languages
@@ -411,7 +424,7 @@
             </button>
             <button
                 on:click={handleDictionary}
-                class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-zinc-700 dark:text-zinc-300 hover:bg-white dark:hover:bg-zinc-900 transition-all hover:shadow-sm border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 active:scale-[0.98] group"
+                class="w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-zinc-700 dark:text-zinc-300 hover:bg-white/90 dark:hover:bg-white/[0.06] transition-all hover:shadow-[0_8px_24px_-18px_rgba(76,29,149,0.65)] border border-transparent hover:border-violet-100 dark:hover:border-white/10 active:scale-[0.98] group"
             >
                 <div class="flex items-center gap-3">
                     <BookOpenText
@@ -424,7 +437,7 @@
             </button>
             <button
                 on:click={() => (showPromptGenerator = true)}
-                class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-zinc-700 dark:text-zinc-300 hover:bg-white dark:hover:bg-zinc-900 transition-all hover:shadow-sm border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 active:scale-[0.98] group"
+                class="w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-zinc-700 dark:text-zinc-300 hover:bg-white/90 dark:hover:bg-white/[0.06] transition-all hover:shadow-[0_8px_24px_-18px_rgba(76,29,149,0.65)] border border-transparent hover:border-violet-100 dark:hover:border-white/10 active:scale-[0.98] group"
             >
                 <div class="flex items-center gap-3">
                     <Sparkles
@@ -437,7 +450,7 @@
             </button>
             <button
                 on:click={() => (showStatsModal = true)}
-                class="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-zinc-700 dark:text-zinc-300 hover:bg-white dark:hover:bg-zinc-900 transition-all hover:shadow-sm border border-transparent hover:border-zinc-200/50 dark:hover:border-zinc-800 active:scale-[0.98] group"
+                class="w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-zinc-700 dark:text-zinc-300 hover:bg-white/90 dark:hover:bg-white/[0.06] transition-all hover:shadow-[0_8px_24px_-18px_rgba(76,29,149,0.65)] border border-transparent hover:border-violet-100 dark:hover:border-white/10 active:scale-[0.98] group"
             >
                 <div class="flex items-center gap-3">
                     <BarChart2
@@ -451,7 +464,7 @@
         </div>
 
         <!-- ── Library section ── -->
-        <div class="px-3 mt-4">
+        <div class="px-4 mt-6">
             <div class="flex items-center justify-between px-2 pt-2 pb-2">
                 <div
                     class="text-[10px] font-bold tracking-[0.15em] text-zinc-400 dark:text-zinc-500 uppercase"
@@ -867,7 +880,7 @@
 
     <!-- ── Bottom settings ── -->
     <div
-        class="border-t border-zinc-200/60 bg-[#f9fafb] dark:border-zinc-800/60 dark:bg-[#0f0f11] shrink-0 pb-[env(safe-area-inset-bottom)]"
+        class="border-t border-violet-100/80 bg-white/60 dark:border-white/10 dark:bg-white/[0.03] shrink-0 pb-[env(safe-area-inset-bottom)]"
     >
         <button
             type="button"

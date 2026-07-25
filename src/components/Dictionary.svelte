@@ -76,11 +76,11 @@
 
 <svelte:window on:click={() => { langPickerOpen = false; }} />
 
-<div class="flex flex-col h-full bg-zinc-50 relative dark:bg-zinc-950 overflow-hidden text-zinc-900 dark:text-zinc-100">
-    <div class="flex flex-col border-b border-zinc-200 dark:border-zinc-800 z-40 bg-white/90 dark:bg-zinc-950/90 backdrop-blur">
+<div class="flex flex-col h-full bg-[#fbfaff] relative dark:bg-[#15131a] overflow-hidden text-zinc-900 dark:text-zinc-100">
+    <div class="flex flex-col border-b border-violet-100/80 dark:border-white/10 z-40 bg-white/80 dark:bg-[#17141d]/85 backdrop-blur-xl">
         <div class="flex items-center gap-3 p-3 md:px-5 md:py-4">
             <button on:click={openHome}
-                class="p-2 -ml-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full text-zinc-600 transition dark:text-zinc-300 dark:hover:bg-zinc-800 dark:active:bg-zinc-700 shrink-0"
+                class="rounded-2xl border border-violet-100 bg-white/80 p-2.5 text-zinc-600 shadow-sm transition dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10 shrink-0"
             ><ArrowLeft size={24} /></button>
 
             <div class="flex-1 flex justify-center">
@@ -95,7 +95,7 @@
                             <input bind:this={searchInputEl} bind:value={query} on:keydown={onKeydown} on:click={openHistoryPanel}
                                 autocomplete="off" spellcheck="false" inputmode="text"
                                 placeholder={currentDict.placeholder}
-                                class="w-full rounded-2xl border border-zinc-200 bg-zinc-100/50 py-2.5 pl-11 pr-10 text-[0.95rem] font-medium text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-[#660874] focus:bg-white focus:ring-4 focus:ring-[#660874]/10 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-white dark:placeholder:text-zinc-500 dark:focus:border-[#9a2eb0] dark:focus:bg-zinc-900"
+                                class="w-full rounded-2xl border border-violet-100 bg-violet-50/60 py-2.5 pl-11 pr-10 text-[0.95rem] font-medium text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-4 focus:ring-violet-500/10 dark:border-white/10 dark:bg-white/[0.04] dark:text-white dark:placeholder:text-zinc-500 dark:focus:border-[#9a2eb0] dark:focus:bg-zinc-900"
                             />
                             <button type="submit" disabled={isSearching || !query.trim()}
                                 class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-xl text-zinc-400 hover:text-[#660874] hover:bg-[#660874]/5 dark:hover:text-[#9a2eb0] dark:hover:bg-[#9a2eb0]/10 transition-colors disabled:opacity-50"
@@ -128,21 +128,30 @@
                     <!-- Language picker -->
                     <div bind:this={langPickerEl} class="relative shrink-0">
                         <button
+                            type="button"
+                            aria-haspopup="listbox"
+                            aria-expanded={langPickerOpen}
+                            aria-label="Choose dictionary language"
                             on:click|stopPropagation={() => langPickerOpen = !langPickerOpen}
-                            class="h-full flex items-center gap-1.5 px-3 py-2 rounded-xl border border-zinc-200 bg-zinc-100/50 text-xs font-semibold text-zinc-700 transition hover:border-zinc-300 hover:bg-white active:scale-[0.98] dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
+                            class="h-full flex items-center gap-1.5 px-3 py-2 rounded-xl border border-violet-100 bg-violet-50/60 text-xs font-semibold text-zinc-700 transition hover:border-zinc-300 hover:bg-white active:scale-[0.98] dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
                         >
                             <Flag code={$dictionaryLanguage} size={18} />
                             <span>{FULL_LABELS[$dictionaryLanguage]}</span>
                             <ChevronDown size={12} class="text-zinc-400 transition-transform {langPickerOpen ? 'rotate-180' : ''}" />
                         </button>
                         {#if langPickerOpen}
-                            <div transition:fade={{ duration: 150 }}
+                            <div
+                                role="menu"
+                                tabindex="-1"
+                                aria-label="Dictionary languages"
+                                transition:fade={{ duration: 150 }}
                                 class="absolute right-0 top-full z-50 mt-1 w-44 rounded-xl border border-zinc-200 bg-white shadow-xl shadow-zinc-950/10 dark:border-zinc-700 dark:bg-zinc-900"
                                 on:click|stopPropagation
+                                on:keydown|stopPropagation
                             >
                                 <div class="p-1.5">
                                     {#each DICT_LANGUAGES as dict}
-                                        <button on:click={() => selectLang(dict.code)}
+                                        <button type="button" on:click={() => selectLang(dict.code)}
                                             class="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] transition hover:bg-zinc-50 dark:hover:bg-zinc-800"
                                         >
                                             <Flag code={dict.code} size={18} />
@@ -171,7 +180,7 @@
             {#if response && response.results.length > 0}
                 <section class="space-y-8 pb-12">
                     {#each response.results as entry}
-                        <article class="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950/80">
+                        <article class="overflow-hidden rounded-[1.5rem] border border-violet-100/80 bg-white/85 shadow-[0_16px_45px_-28px_rgba(76,29,149,0.45)] dark:border-white/10 dark:bg-white/[0.06]">
                             <div class="px-5 py-6 sm:px-8 sm:py-8">
                                 <div class="definition-html max-w-none">{@html entry.definition_html}</div>
                             </div>
@@ -180,7 +189,7 @@
                 </section>
             {:else if response && response.results.length === 0}
                 <div class="mt-12 flex flex-col items-center justify-center text-center">
-                    <div class="flex h-20 w-20 items-center justify-center rounded-full bg-zinc-100 text-zinc-400 dark:bg-zinc-900 dark:text-zinc-600 mb-6"><Search size={32} /></div>
+                    <div class="mb-6 flex h-20 w-20 items-center justify-center rounded-[1.5rem] bg-violet-100/70 text-violet-400 dark:bg-violet-500/10 dark:text-violet-300"><Search size={32} /></div>
                     <h3 class="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-2">No matches found</h3>
                     <p class="max-w-sm text-sm text-zinc-500 dark:text-zinc-400">Try a different spelling or form of the word.</p>
                 </div>

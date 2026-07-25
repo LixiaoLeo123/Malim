@@ -293,6 +293,7 @@
 
 	async function clearAndPaste() {
 		try {
+			sourceText = "";
 			const text = await navigator.clipboard.readText();
 			sourceText = text;
 			notifications.success("Text pasted from clipboard");
@@ -357,11 +358,11 @@
 
 <svelte:window on:click={handleClickOutside} />
 
-<div bind:this={containerEl} class="relative h-full w-full overflow-y-auto overscroll-contain bg-[#f6f7fb] text-zinc-900 dark:bg-[#09090b] dark:text-zinc-100 xl:overflow-hidden">
+<div bind:this={containerEl} class="relative h-full w-full overflow-y-auto overscroll-contain bg-[#fbfaff] text-zinc-900 dark:bg-[#15131a] dark:text-zinc-100 xl:overflow-hidden">
 	<div class="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_top_left,rgba(102,8,116,0.12),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(102,8,116,0.1),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.88),rgba(255,255,255,0.72))] dark:bg-[radial-gradient(circle_at_top_left,rgba(154,46,176,0.12),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(154,46,176,0.1),transparent_28%),linear-gradient(180deg,rgba(9,9,11,0.98),rgba(9,9,11,0.92))]"></div>
 
 	<div class="relative flex min-h-full flex-col xl:h-full">
-		<header class="sticky top-0 z-40 border-b border-zinc-100 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
+		<header class="sticky top-0 z-40 border-b border-violet-100/80 bg-white/80 backdrop-blur-xl dark:border-white/10 dark:bg-[#17141d]/85">
 			<div class="flex items-center justify-between gap-4 p-4 pb-2 md:px-6 md:py-4">
 				<div class="flex min-w-0 items-center gap-2">
 					<button on:click={handleBack} class="p-2 -ml-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full text-zinc-600 transition duration-100 ease-out dark:text-zinc-300 dark:hover:bg-zinc-800 dark:active:bg-zinc-700" aria-label="Back">
@@ -382,7 +383,7 @@
 			<section class="flex flex-col gap-4 xl:grid xl:min-h-0 xl:grid-rows-[minmax(0,1fr)_minmax(0,1fr)]">
 
 				<!-- Source Panel -->
-				<div class="flex flex-col overflow-visible rounded-[20px] border border-zinc-200/70 bg-white shadow-sm dark:border-zinc-800/80 dark:bg-zinc-900 md:rounded-[24px]">
+				<div class="flex flex-col overflow-visible rounded-[1.5rem] border border-violet-100/80 bg-white/85 shadow-[0_16px_45px_-28px_rgba(76,29,149,0.45)] dark:border-white/10 dark:bg-white/[0.06] md:rounded-[24px]">
 					<div class="flex items-center justify-between border-b border-zinc-100 px-3 py-2.5 dark:border-zinc-800 md:px-5 md:py-4">
 						<div class="flex items-center gap-3">
 							<div>
@@ -468,21 +469,22 @@
 						<button
 							on:click={translateText}
 							disabled={isTranslating || !sourceText.trim()}
-							class="flex-1 md:flex-none md:ml-auto inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-[13px] font-semibold text-white shadow-sm transition-all active:scale-95 disabled:opacity-50 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-200 md:px-5 md:py-2.5"
+							title={`Translate to ${targetLangLabel}`}
+							class="ml-auto inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-violet-600 px-3.5 py-3 text-[13px] font-semibold text-white shadow-lg shadow-violet-500/20 transition-all active:scale-95 disabled:opacity-50 hover:bg-violet-700 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-400 md:py-2.5"
 						>
 							{#if isTranslating}
 								<LoaderCircle size={16} class="animate-spin" />
 								<span>Translating...</span>
 							{:else}
 								<Sparkles size={16} />
-								<span>Translate to {targetLangLabel}</span>
+								<span>Translate</span>
 							{/if}
 						</button>
 					</div>
 				</div>
 
 				<!-- Target Panel -->
-				<div class="flex flex-col overflow-visible rounded-[20px] border border-zinc-200/70 bg-white shadow-sm dark:border-zinc-800/80 dark:bg-zinc-900 md:rounded-[24px]">
+				<div class="flex flex-col overflow-visible rounded-[1.5rem] border border-violet-100/80 bg-white/85 shadow-[0_16px_45px_-28px_rgba(76,29,149,0.45)] dark:border-white/10 dark:bg-white/[0.06] md:rounded-[24px]">
 					<div class="flex items-center justify-between border-b border-zinc-100 px-3 py-2.5 dark:border-zinc-800 md:px-5 md:py-4">
 						<div class="flex items-center gap-3">
 							<div>

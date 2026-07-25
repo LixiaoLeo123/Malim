@@ -53,7 +53,7 @@
 	let isLoadingHistory = false;
 	let hasMoreHistory = true;
 	let historyLoadedOnce = false;
-	let firstLoad = true;
+	let initialScrollComplete = false;
 	let containerEl: HTMLElement | null = null;
 	let textareaEl: HTMLTextAreaElement | null = null;
 	let proactiveTimer: number | null = null;
@@ -392,8 +392,8 @@
 		const top = spaceBelow < 250;
 
 		popoverPos = {
-			left: popoverLeft - containerRect.left,
-			top: (top ? rect.top - 10 : rect.bottom + 10) - containerRect.top,
+			left: popoverLeft,
+			top: top ? rect.top - 10 : rect.bottom + 10,
 			align: top ? "top" : "bottom",
 			arrowLeft: arrowLeft,
 		};
@@ -426,7 +426,12 @@
 
 	async function scrollToBottom() {
 		await tick();
-		if (chatContainer) chatContainer.scrollTop = chatContainer.scrollHeight;
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		if (!chatContainer) return;
+		chatContainer.style.scrollBehavior = "auto";
+		chatContainer.scrollTop = chatContainer.scrollHeight;
+		chatContainer.style.scrollBehavior = "";
 	}
 
 	async function apiSaveGrammar(logId: number, corrections: any[]) {
@@ -589,7 +594,8 @@
 				await tick();
 				if (chatContainer) {
 					if (beforeId === null) {
-						scrollToBottom();
+						await scrollToBottom();
+						initialScrollComplete = true;
 					} else {
 						chatContainer.style.scrollBehavior = "auto";
 						chatContainer.scrollTop =
@@ -1032,16 +1038,9 @@
 			.replace(/\s+\)/g, ")");
 	}
 
-	$: if ($currentView === "chat" && chatContainer && firstLoad) {
-		tick().then(() => {
-			requestAnimationFrame(() => {
-				if (chatContainer) {
-					firstLoad = false;
-					chatContainer.style.scrollBehavior = "auto";
-					chatContainer.scrollTop = chatContainer.scrollHeight;
-					chatContainer.style.scrollBehavior = "";
-				}
-			});
+	$: if ($currentView === "chat" && chatContainer && historyLoadedOnce && !initialScrollComplete) {
+		void scrollToBottom().then(() => {
+			initialScrollComplete = true;
 		});
 	}
 
@@ -1087,7 +1086,7 @@
 	style="--chat-bg-image: {backgroundUrl ? `url(${backgroundUrl})` : 'none'}"
 >
 	<header class="top-bar">
-		<button class="icon-btn" on:click={handleBack}>
+		<button type="button" class="icon-btn" aria-label="Back to previous view" on:click={handleBack}>
 			<svg
 				viewBox="0 0 24 24"
 				fill="none"
@@ -1100,7 +1099,7 @@
 			</svg>
 		</button>
 		<div class="title">{isTyping ? "Typing..." : $settings.aiNickname}</div>
-		<button class="icon-btn" on:click={() => (isDrawerOpen = true)}>
+		<button type="button" class="icon-btn" aria-label="Open chat settings" on:click={() => (isDrawerOpen = true)}>
 			<svg viewBox="0 0 24 24" fill="currentColor">
 				<circle cx="5" cy="12" r="2.5" />
 				<circle cx="12" cy="12" r="2.5" />
@@ -1126,7 +1125,9 @@
 						{/if}
 						{#if msg.isMine && msg.status === "error"}
 							<button
-								class="error-icon"
+								type="button"
+					aria-label="Retry sending message"
+					class="error-icon"
 								on:click={() => sendMessage(msg.text, msg.id)}
 							>
 								<svg viewBox="0 0 24 24" fill="var(--danger)">
@@ -1143,7 +1144,7 @@
 						<div class="bubble-group">
 							{#if !msg.isMine && msg.parseStatus === "done" && msg.parsedSentences}
 								<div
-									class="bubble parsed-bubble"
+									role="button" tabindex="0" aria-label="Parsed message actions" class="bubble parsed-bubble"
 									on:pointerdown={(e) =>
 										onPointerDown(e, msg.id)}
 									on:pointerup={onPointerUp}
@@ -1160,6 +1161,12 @@
 								>
 									{#each msg.parsedSentences as sentence}
 										<div
+											role="button"
+
+											tabindex="0"
+
+											aria-label="Open sentence translation and actions"
+
 											class="parsed-sentence"
 											on:pointerdown={(e) => {
 												e.stopPropagation();
@@ -1176,6 +1183,7 @@
 												)}
 											on:click={() =>
 												handleSentenceClick(sentence)}
+													on:keydown={(e) => { if (e.key === "Enter" || e.key === " ") handleSentenceClick(sentence); }}
 										>
 											<div class="parsed-words">
 												{#each sentence.blocks as block}
@@ -1245,7 +1253,7 @@
 								</div>
 							{:else if !msg.isMine && msg.parseStatus === "parsing"}
 								<div
-									class="bubble"
+									role="button" tabindex="0" aria-label="Message actions" class="bubble"
 									on:pointerdown={(e) =>
 										onPointerDown(e, msg.id)}
 									on:pointerup={onPointerUp}
@@ -1267,7 +1275,7 @@
 								</div>
 							{:else if !msg.isMine && msg.parseStatus === "error"}
 								<div
-									class="bubble"
+									role="button" tabindex="0" aria-label="Message actions" class="bubble"
 									on:pointerdown={(e) =>
 										onPointerDown(e, msg.id)}
 									on:pointerup={onPointerUp}
@@ -1289,7 +1297,7 @@
 								</div>
 							{:else}
 								<div
-									class="bubble"
+									role="button" tabindex="0" aria-label="Message actions" class="bubble"
 									on:pointerdown={(e) =>
 										onPointerDown(e, msg.id)}
 									on:pointerup={onPointerUp}
@@ -1321,6 +1329,9 @@
 								</div>
 							{:else if msg.isMine && msg.grammarCorrections}
 								<div
+									role="button"
+									tabindex="0"
+									aria-label="Grammar correction actions"
 									class="grammar-check result"
 									on:pointerdown={(e) => {
 										e.stopPropagation();
@@ -1612,38 +1623,41 @@
 	{/if}
 
 	{#if isDrawerOpen}
-		<div
+		<button
+			type="button"
+			aria-label="Close chat settings"
 			class="drawer-overlay"
 			on:click={() => (isDrawerOpen = false)}
 			transition:fade={{ duration: 200 }}
-		></div>
-		<div class="drawer" transition:fly={{ x: 300, duration: 300 }}>
+		></button>
+		<div class="drawer" role="dialog" aria-modal="true" aria-labelledby="chat-settings-title" transition:fly={{ x: 300, duration: 300 }}>
 			<div class="drawer-header">
-				<h2>Settings</h2>
-				<button on:click={() => (isDrawerOpen = false)}>Close</button>
+				<h2 id="chat-settings-title">Settings</h2>
+				<button type="button" aria-label="Close chat settings" on:click={() => (isDrawerOpen = false)}>Close</button>
 			</div>
 			<div class="setting-item">
-				<label>Your Avatar URL</label>
-				<input type="text" bind:value={$settings.userAvatarUrl} />
+				<label for="chat-user-avatar">Your Avatar URL</label>
+				<input id="chat-user-avatar" type="text" bind:value={$settings.userAvatarUrl} />
 			</div>
 			<div class="setting-item">
-				<label>AI Avatar URL</label>
-				<input type="text" bind:value={$settings.aiAvatarUrl} />
+				<label for="chat-ai-avatar">AI Avatar URL</label>
+				<input id="chat-ai-avatar" type="text" bind:value={$settings.aiAvatarUrl} />
 			</div>
 			<div class="setting-item">
-				<label>Chat Background URL</label>
+				<label for="chat-background">Chat Background URL</label>
 				<input
 					type="text"
+					id="chat-background"
 					bind:value={backgroundUrl}
 					placeholder="Leave empty for default"
 				/>
 			</div>
 			<div class="setting-item">
-				<label>AI Nickname</label>
-				<input type="text" bind:value={$settings.aiNickname} />
+				<label for="chat-ai-nickname">AI Nickname</label>
+				<input id="chat-ai-nickname" type="text" bind:value={$settings.aiNickname} />
 			</div>
 			<div class="setting-item token-setting">
-				<label>Chat Token Limits</label>
+				<div class="setting-label">Chat Token Limits</div>
 				<div class="setting-tip">
 					Recommended: 4000 / 1000 / 1000 / 500
 				</div>

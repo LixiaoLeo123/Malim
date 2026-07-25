@@ -16,6 +16,7 @@
 
     let showLangSelector = false;
     $: wordCount = !$editorDraft.content?.trim() ? 0 : $editorDraft.content.trim().split(/\s+/).length;
+    $: canSubmit = Boolean($editorDraft.content?.trim() || ($editorDraft.images || []).length);
 
     function goBack() {
         popView();
@@ -190,19 +191,30 @@
     }
 </script>
 
-<div class="flex flex-col h-full bg-white relative dark:bg-zinc-950">
+<div class="flex flex-col h-full bg-[#fffefe] relative dark:bg-[#17141d]">
     <div
-        class="flex justify-between items-center p-4 border-b border-zinc-100 dark:border-zinc-800"
+        class="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-violet-100/80 bg-white/75 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-[#17141d]/85"
     >
         <button
+            type="button"
+            aria-label="Back"
             on:click={goBack}
-            class="p-2 -ml-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full text-zinc-600 transition duration-100 ease-out dark:text-zinc-300 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+            class="rounded-2xl border border-violet-100 bg-white/80 p-2.5 text-zinc-600 shadow-sm transition duration-100 ease-out hover:bg-white active:scale-95 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10"
         >
             <ArrowLeft size={24} />
         </button>
 
+        <div class="min-w-0 text-center">
+            <h1 class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                {$activeArticleId ? "Edit reading" : "New reading"}
+            </h1>
+        </div>
+
         <div class="relative z-50">
             <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={showLangSelector}
                 on:click={() => (showLangSelector = !showLangSelector)}
                 class="flex items-center space-x-2 px-2 py-1.5 bg-zinc-100 rounded-lg text-sm font-medium hover:bg-zinc-200 transition text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
             >
@@ -224,10 +236,14 @@
 
             {#if showLangSelector}
                 <div
+                    role="menu"
+                    aria-label="Reading language"
                     transition:slide
                     class="absolute top-full right-0 mt-2 w-40 bg-white border border-zinc-200 rounded-xl shadow-xl overflow-hidden dark:bg-zinc-900 dark:border-zinc-700"
                 >
                     <button
+                        type="button"
+                        role="menuitem"
                         class="w-full text-left px-4 py-2 hover:bg-zinc-50 flex items-center space-x-3 text-sm text-zinc-700 dark:hover:bg-zinc-800 dark:text-zinc-200"
                         on:click={() => {
                             $editorDraft.language = "KR";
@@ -238,6 +254,8 @@
                         <span>Korean</span>
                     </button>
                     <button
+                        type="button"
+                        role="menuitem"
                         class="w-full text-left px-4 py-2 hover:bg-zinc-50 flex items-center space-x-3 text-sm text-zinc-700 dark:hover:bg-zinc-800 dark:text-zinc-200"
                         on:click={() => {
                             $editorDraft.language = "RU";
@@ -248,6 +266,8 @@
                         <span>Russian</span>
                     </button>
                     <button
+                        type="button"
+                        role="menuitem"
                         class="w-full text-left px-4 py-2 hover:bg-zinc-50 flex items-center space-x-3 text-sm text-zinc-700 dark:hover:bg-zinc-800 dark:text-zinc-200"
                         on:click={() => {
                             $editorDraft.language = "ES";
@@ -264,6 +284,7 @@
 
     <div class="flex-1 flex flex-col overflow-hidden">
         <textarea
+            aria-label="Reading text"
             class="flex-1 w-full p-6 text-lg resize-none outline-none text-zinc-800 placeholder:text-zinc-300 leading-relaxed dark:text-zinc-100 dark:placeholder:text-zinc-600 dark:bg-transparent"
             placeholder="Paste your text here... (you can also paste images)"
             bind:value={$editorDraft.content}
@@ -284,8 +305,10 @@
                                 class="w-28 h-28 object-cover rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm"
                             />
                             <button
+                                type="button"
+                                aria-label={`Remove ${img.fileName}`}
                                 on:click={() => removeImage(img.id)}
-                                class="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-red-600"
+                                class="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity shadow-md hover:bg-red-600"
                             >
                                 <X size={14} />
                             </button>
@@ -300,19 +323,23 @@
     {/if}
 
     <div
-        class="p-4 border-t border-zinc-100 flex justify-between items-center bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90"
+        class="flex items-center justify-between gap-4 border-t border-violet-100/80 bg-white/80 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-[#17141d]/85"
     >
-        <div class="flex items-center gap-3">
-            <span class="text-xs font-mono text-zinc-400">{wordCount} words</span>
+        <div class="flex min-w-0 items-center gap-2 text-xs text-zinc-400">
+            <span>{wordCount} {wordCount === 1 ? "word" : "words"}</span>
             {#if ($editorDraft.images || []).length > 0}
-                <span class="text-xs font-mono text-zinc-400">| {($editorDraft.images || []).length} image(s)</span>
+                <span aria-hidden="true">·</span>
+                <span>{($editorDraft.images || []).length} {($editorDraft.images || []).length === 1 ? "image" : "images"}</span>
             {/if}
         </div>
         <button
+            type="button"
+            disabled={!canSubmit}
             on:click={handleConfirm}
-            class="bg-zinc-900 text-white p-3 rounded-full hover:bg-black transition shadow-lg hover:shadow-xl active:scale-95 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            class="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition shadow-lg {canSubmit ? 'bg-violet-600 text-white shadow-violet-500/20 hover:bg-violet-700 hover:shadow-xl active:scale-95 dark:bg-violet-500 dark:text-white dark:hover:bg-violet-400' : 'cursor-not-allowed bg-zinc-200 text-zinc-400 shadow-none dark:bg-zinc-800 dark:text-zinc-600'}"
         >
-            <Check size={24} />
+            <Check size={18} aria-hidden="true" />
+            <span>{$activeArticleId ? "Update" : "Process text"}</span>
         </button>
     </div>
 </div>

@@ -381,8 +381,8 @@
         const showOnTop = spaceBelow < 250;
 
         popoverPosition = {
-            left: popoverLeft - containerRect.left,
-            top: (showOnTop ? rect.top - 10 : rect.bottom + 10) - containerRect.top,
+            left: popoverLeft,
+            top: showOnTop ? rect.top - 10 : rect.bottom + 10,
             align: showOnTop ? "top" : "bottom",
             arrowLeft: arrowLeft,
         };
@@ -437,22 +437,22 @@
 
 <svelte:window on:click={handleGlobalClick} />
 
-<div class="flex flex-col h-full bg-white relative dark:bg-zinc-950" bind:this={containerEl}>
+<div class="flex flex-col h-full bg-[#fffefe] relative dark:bg-[#17141d]" bind:this={containerEl}>
     <div
-        class="h-14 border-b border-zinc-100 flex items-center justify-between px-4 sticky top-0 bg-white/95 backdrop-blur z-30 dark:border-zinc-800 dark:bg-zinc-950/95"
+        class="h-16 border-b border-violet-100/80 flex items-center justify-between px-4 md:px-7 sticky top-0 bg-white/80 backdrop-blur-xl z-30 dark:border-white/10 dark:bg-[#17141d]/85"
     >
         <div class="flex items-center space-x-2">
             <button
-                class="md:hidden p-2 -ml-2 rounded-full hover:bg-zinc-100 text-zinc-600 transition-colors dark:hover:bg-zinc-800 dark:text-zinc-300"
+                class="md:hidden rounded-2xl border border-violet-100 bg-white/80 p-2.5 text-zinc-600 shadow-sm transition-colors hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10"
                 on:click={() => isSidebarOpen.update((v) => !v)}
             >
                 <Menu size={24} />
             </button>
             <div
-                class="relative inline-grid grid-cols-2 bg-zinc-100 rounded-lg p-0.5 dark:bg-zinc-800/50"
+                class="relative inline-grid grid-cols-2 rounded-2xl border border-violet-100/80 bg-violet-50/70 p-1 dark:border-white/10 dark:bg-white/[0.06]"
             >
                 <div
-                    class="absolute top-0.5 bottom-0.5 left-0.5 w-1/2 bg-white rounded-md shadow-sm transition-transform duration-200 ease-out dark:bg-zinc-700"
+                    class="absolute bottom-1 left-1 top-1 w-[calc(50%-0.25rem)] rounded-xl bg-white shadow-[0_3px_10px_-5px_rgba(76,29,149,0.5)] transition-transform duration-200 ease-out dark:bg-white/15"
                     style="transform: translateX({viewMode === 'sentence'
                         ? '100%'
                         : '0%'});"
@@ -498,7 +498,7 @@
     <div
         bind:this={scrollContainerEl}
         on:scroll={containerScroll}
-        class="flex-1 overflow-y-auto p-6 md:p-10 leading-loose text-lg md:text-xl font-medium text-zinc-800 dark:text-zinc-200 pb-[35vh]"
+        class="flex-1 overflow-y-auto p-6 md:px-[clamp(2rem,8vw,9rem)] md:py-10 leading-loose text-lg md:text-xl font-medium text-zinc-800 dark:text-zinc-200 pb-[35vh]"
     >
         {#if article}
             {#if article.imageParticles && article.imageParticles.length > 0}

@@ -360,8 +360,11 @@
                             <div
                                 class="bg-zinc-50 dark:bg-zinc-800 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700"
                             >
-                                <div
-                                    class="flex items-center justify-between p-2 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-700/50"
+                                <button
+                                    type="button"
+                                    class="flex w-full items-center justify-between p-2 text-left cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-700/50"
+                                    aria-expanded={expandedConfigId === config.id}
+                                    aria-label={`${expandedConfigId === config.id ? "Collapse" : "Expand"} ${config.name || "AI profile"}`}
                                     on:click={() => toggleExpand(config.id)}
                                 >
                                     <div
@@ -379,9 +382,10 @@
                                     </div>
                                     <ChevronsUpDown
                                         size={16}
+                                        aria-hidden="true"
                                         class="text-zinc-400"
                                     />
-                                </div>
+                                </button>
 
                                 {#if expandedConfigId === config.id}
                                     <div
@@ -566,6 +570,7 @@
                 >
                 <button
                     type="button"
+                    aria-label="Toggle grammar notes"
                     class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempGrammarNotesEnabled
                         ? 'bg-zinc-900 dark:bg-zinc-100'
                         : 'bg-zinc-300 dark:bg-zinc-700'}"
@@ -639,6 +644,7 @@
                 >
                 <button
                     type="button"
+                    aria-label="Toggle precise Russian accentuation"
                     class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempRuaccentEnabled
                         ? 'bg-zinc-900 dark:bg-zinc-100'
                         : 'bg-zinc-300 dark:bg-zinc-700'}"
@@ -678,6 +684,7 @@
                 >
                 <button
                     type="button"
+                    aria-label="Toggle memory model"
                     class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempMemoryModelEnabled
                         ? 'bg-zinc-900 dark:bg-zinc-100'
                         : 'bg-zinc-300 dark:bg-zinc-700'}"
@@ -700,6 +707,7 @@
                 >
                 <button
                     type="button"
+                    aria-label="Toggle dictionary preloading"
                     class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempPreloadDict
                         ? 'bg-zinc-900 dark:bg-zinc-100'
                         : 'bg-zinc-300 dark:bg-zinc-700'}"
@@ -721,6 +729,7 @@
                 >
                 <button
                     type="button"
+                    aria-label="Toggle remote sync"
                     class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempSyncEnabled
                         ? 'bg-zinc-900 dark:bg-zinc-100'
                         : 'bg-zinc-300 dark:bg-zinc-700'}"
@@ -772,6 +781,7 @@
                 >
                 <button
                     type="button"
+                    aria-label="Toggle automatic speech"
                     class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempAutoSpeak
                         ? 'bg-zinc-900 dark:bg-zinc-100'
                         : 'bg-zinc-300 dark:bg-zinc-700'}"
@@ -790,6 +800,7 @@
                 >
                 <button
                     type="button"
+                    aria-label="Toggle audio pre-caching"
                     class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors {tempPreCacheAudio
                         ? 'bg-zinc-900 dark:bg-zinc-100'
                         : 'bg-zinc-300 dark:bg-zinc-700'}"

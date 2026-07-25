@@ -340,21 +340,21 @@
     }
 </script>
 
-<div class="flex flex-col h-full bg-white relative dark:bg-zinc-950 overflow-hidden">
+<div class="flex flex-col h-full bg-[#fffefe] relative dark:bg-[#17141d] overflow-hidden">
     <div
-        class="flex flex-col border-b border-zinc-100 dark:border-zinc-800 z-40 bg-white/90 dark:bg-zinc-950/90 backdrop-blur"
+        class="flex flex-col border-b border-violet-100/80 dark:border-white/10 z-40 bg-white/80 dark:bg-[#17141d]/85 backdrop-blur-xl"
     >
-        <div class="flex justify-between items-center p-4 pb-2">
+        <div class="flex justify-between items-center px-5 py-4 pb-3">
             <button
                 on:click={goBack}
-                class="p-2 -ml-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full text-zinc-600 transition duration-100 ease-out dark:text-zinc-300 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+                class="rounded-2xl border border-violet-100 bg-white/80 p-2.5 text-zinc-600 shadow-sm transition duration-100 ease-out hover:bg-white active:scale-95 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10"
             >
                 <ArrowLeft size={24} />
             </button>
             <div class="flex items-center space-x-2">
                 <button
                     on:click={handleReset}
-                    class="flex items-center justify-center p-2 rounded-lg transition bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                    class="flex items-center justify-center rounded-2xl border border-violet-100 bg-violet-50/70 p-2.5 text-violet-600 transition hover:bg-violet-100 dark:border-white/10 dark:bg-white/5 dark:text-violet-300 dark:hover:bg-white/10"
                     title="Reset Feed"
                 >
                     <RotateCcw
@@ -366,9 +366,9 @@
                 </button>
                 <button
                     on:click={toggleFamiliarity}
-                    class="flex items-center justify-center p-2 rounded-lg transition {markFamiliarity
-                        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                        : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700'}"
+                    class="flex items-center justify-center rounded-2xl border border-violet-100 p-2.5 transition {markFamiliarity
+                        ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/20 dark:bg-violet-500'
+                        : 'bg-violet-50/70 text-violet-600 hover:bg-violet-100 dark:bg-white/5 dark:text-violet-300 dark:hover:bg-white/10'}"
                     title="Toggle Familiarity Highlighting"
                 >
                     <Brain size={18} />
@@ -442,6 +442,8 @@
 
     <div
         bind:this={feedContainer}
+        role="region"
+        aria-label="Discover article feed"
         on:scroll={handleScroll}
         on:wheel={handleWheel}
         on:touchstart={handleTouchStart}
@@ -455,7 +457,7 @@
                 <button
                     type="button"
                     on:click={() => (selectedArticle = article)}
-                    class="group relative overflow-hidden rounded-2xl bg-zinc-100 dark:bg-zinc-900 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg cursor-pointer border ring-1 ring-inset {getDifficultyRingClass(
+                    class="group relative overflow-hidden rounded-[1.35rem] bg-violet-50/70 dark:bg-white/[0.06] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_18px_42px_-18px_rgba(76,29,149,0.45)] cursor-pointer border border-violet-100/80 dark:border-white/10 ring-1 ring-inset {getDifficultyRingClass(
                         article.difficulty
                     )} {layoutClasses[i]} text-left"
                 >
@@ -547,7 +549,7 @@
         >
             <button
                 on:click={closeArticle}
-                class="p-2 -ml-2 hover:bg-zinc-100 active:scale-95 active:bg-zinc-200 rounded-full text-zinc-600 transition duration-100 ease-out dark:text-zinc-300 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
+                class="rounded-2xl border border-violet-100 bg-white/80 p-2.5 text-zinc-600 shadow-sm transition duration-100 ease-out hover:bg-white active:scale-95 dark:border-white/10 dark:bg-white/5 dark:text-zinc-300 dark:hover:bg-white/10"
             >
                 <ArrowLeft size={24} />
             </button>
